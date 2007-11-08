@@ -47,6 +47,46 @@
 #include "cap32.h"
 #include "z80.h"
 
+#ifdef ALIGN_DWORD
+/* Alignment from SMS Plus by Charles MacDonald */
+static inline word read_word(void *address)
+{
+  if ((dword)address & 3)
+  {
+#ifdef LSB_FIRST  /* little endian version */
+    return ( *((byte *)address) +
+        (*((byte *)address+1) << 8));
+#else             /* big endian version */
+    return ( *((byte *)address+1) +
+        (*((byte *)address)   << 8) );
+#endif
+  }
+  else
+    return *(word *)address;
+}
+
+
+static __inline__ void write_word(void *address, word data)
+{
+  if ((dword)address & 3)
+  {
+#ifdef LSB_FIRST
+    *((byte *)address) =    data;
+    *((byte *)address+1) = (data >> 8);
+#else
+    *((byte *)address+1) = data;
+    *((byte *)address)   = (data >> 8);
+#endif
+    return;
+  }
+  else
+    *(word *)address = data;
+}
+#else
+#define read_word(address) *(word *)address
+#define write_word(address,data) *(word *)address=data
+#endif
+
 extern t_CPC CPC;
 extern t_PSG PSG;
 extern dword freq_table[];
@@ -342,7 +382,6 @@ void SetAYRegister(int Num, byte Value)
 }
 
 
-
 inline void Synthesizer_Logic_Q(void)
 {
    Ton_Counter_A.Hi++;
@@ -369,9 +408,12 @@ inline void Synthesizer_Logic_Q(void)
       Case_EnvType();
    }
    Envelope_Counter.Hi++;
-   if (Envelope_Counter.Hi >= *(word *)&PSG.RegisterAY.EnvelopeLo) {
+   if (Envelope_Counter.Hi >= read_word(&PSG.RegisterAY.EnvelopeLo)) {
       Envelope_Counter.Hi = 0;
    }
+//   if (Envelope_Counter.Hi >= *(word *)&PSG.RegisterAY.EnvelopeLo) {
+//      Envelope_Counter.Hi = 0;
+//   }
 }
 
 

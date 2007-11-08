@@ -42,7 +42,7 @@ ResumeEmulation = 1;
     if (!ExitPSP)
     {
       /* Set clock frequency during emulation */
-//      pspSetClockFrequency(Options.ClockFreq);
+      pspSetClockFrequency(333);//Options.ClockFreq);
       /* Set buttons to normal mode */
       pspCtrlSetPollingMode(PSP_CTRL_NORMAL);
 

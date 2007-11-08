@@ -25,6 +25,7 @@ extern t_CPC CPC;
 extern t_drive driveA;
 extern t_drive driveB;
 extern t_VDU VDU;
+extern byte *pbSndBuffer;
 
 #define MAX_DISK_FORMAT     2
 #define DEF_SPEED_SETTING   4
@@ -35,10 +36,7 @@ t_disk_format disk_format[MAX_DISK_FORMAT] = {
    { "169K Vendor Format", 40, 1, 9, 2, 0x52, 0xe5, {{ 0x41, 0x46, 0x42, 0x47, 0x43, 0x48, 0x44, 0x49, 0x45 }} }
 };
 
-dword freq_table[5] = {
-/*  11025, 22050, 44100, 48000, 96000 */
-  44100, 44100, 44100, 44100, 44100
-};
+dword freq_table[] = { 44100, 44100, 44100, 44100, 44100 };
 
 PspImage *Screen = NULL;
 
@@ -53,8 +51,10 @@ int  emulator_init();
 void audio_shutdown();
 int  dsk_load(char *pchFileName, t_drive *drive, char chID);
 void dsk_eject(t_drive *drive);
+int snapshot_load (char *pchFileName);
 
 static void RenderVideo();
+static void AudioCallback(void* buf, unsigned int *length, void *userdata);
 
 FILE*foo; /* TODO */
 
@@ -88,11 +88,6 @@ fclose(foo);
   CPC.keyboard = 0;
   CPC.joysticks = 0;
 
-  CPC.scr_fs_width = 480; // TODO:
-  CPC.scr_fs_height = 272; // TODO:
-  CPC.scr_fs_bpp = Screen->Depth; // TODO:
-  CPC.scr_style = 0; // TODO:
-  CPC.scr_oglfilter = 0;
   CPC.scr_vsync = 0;
   CPC.scr_led = 1;
   CPC.scr_fps = 0;
@@ -101,7 +96,7 @@ fclose(foo);
   CPC.scr_remanency = 0;
   CPC.scr_window = 0;
 
-  CPC.snd_enabled = 0;
+  CPC.snd_enabled = 1;
   CPC.snd_playback_rate = 2;
   CPC.snd_bits = 1;
   CPC.snd_stereo = 1;
@@ -134,7 +129,7 @@ fclose(foo);
 
   for (i = 0; i < 16; i++) strcpy(CPC.rom_file[i], "");
 
-//  strcpy(CPC.rom_file[7], "amsdos.rom");
+//  strcpy(CPC.rom_file[0], "sorcery.sna");
 
   z80_init_tables(); // init Z80 emulation
 
@@ -183,6 +178,12 @@ void RunEmulation()
   int z80_exit = EC_FRAME_COMPLETE;
   dword dwOffset;
 
+/*TODO */
+snapshot_load("sorcery.sna");
+
+  /* Resume sound */
+  pspAudioSetChannelCallback(0, AudioCallback, 0);
+
   while (!ExitPSP)
   {
     if (CPC.limit_speed)
@@ -196,8 +197,8 @@ void RunEmulation()
     }
 
     dwOffset = CPC.scr_pos - CPC.scr_base; // offset in current surface row
-    if (VDU.scrln > 0)
-      CPC.scr_base = (dword *)Screen->Pixels + (VDU.scrln * CPC.scr_line_offs); // determine current position
+    if (VDU.scrln > 0)  // determine current position
+      CPC.scr_base = (dword *)Screen->Pixels + (VDU.scrln * CPC.scr_line_offs);
     else CPC.scr_base = (dword *)Screen->Pixels; // reset to surface start
     CPC.scr_pos = CPC.scr_base + dwOffset; // update current rendering position
 
@@ -205,6 +206,9 @@ void RunEmulation()
 
     if (z80_exit == EC_FRAME_COMPLETE) RenderVideo();
   }
+
+  /* Pause sound */
+  pspAudioSetChannelCallback(0, NULL, 0);
 }
 
 /* Release emulation resources */
@@ -275,3 +279,7 @@ void RenderVideo()
   pspVideoSwapBuffers();
 }
 
+void AudioCallback(void* buf, unsigned int *length, void *userdata)
+{
+  memcpy(buf, pbSndBuffer, CPC.snd_buffersize);
+}
