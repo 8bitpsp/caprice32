@@ -1,0 +1,44 @@
+PSPSDK=$(shell psp-config --pspsdk-path)
+
+PSPAPP=psp
+PSPLIB=$(PSPAPP)/mypsp
+DATA=$(PSPAPP)/data
+
+PSP_APP_NAME=CaPriCe32 PSP
+PSP_APP_VER=4.2.0
+
+TARGET=cpc32psp
+EXTRA_TARGETS=EBOOT.PBP
+PSP_EBOOT_TITLE=$(PSP_APP_NAME) $(PSP_APP_VER)
+#PSP_EBOOT_ICON=$(DATA)/arnold-icon.png
+
+BUILD_APP=z80.o crtc.o fdc.o tape.o psg.o psp/cap32.o
+BUILD_PSPAPP=$(PSPAPP)/main.o $(PSPAPP)/emulate.o $(PSPAPP)/menu.o
+
+OBJS=$(BUILD_APP) $(BUILD_PSPAPP)
+
+DEFINES=-DLSB_FIRST -DALIGN_DWORD
+BASE_DEFS=-DPSP -DPSP_APP_VER=\"$(PSP_APP_VER)\" -DPSP_APP_NAME="\"$(PSP_APP_NAME)\""
+CFLAGS=-O2 -G0 -Wall $(BASE_DEFS) $(DEFINES)
+CXXFLAGS=$(CFLAGS) -fno-exceptions -fno-rtti
+ASFLAGS=$(CFLAGS)
+INCDIR=$(PSPLIB) .
+LIBDIR=$(PSPLIB)
+LIBS=-lmypsp -lpng -lm -lstdc++ -lc -lz -lpspgu -lpsppower -lpspaudio -lpsprtc
+
+include $(PSPSDK)/lib/build.mak
+
+z80.o: z80.c z80.h cap32.h
+	psp-g++ $(CXXFLAGS) -c z80.c
+
+crtc.o: crtc.c cap32.h crtc.h z80.h
+	psp-g++ $(CXXFLAGS) -c crtc.c
+
+fdc.o: fdc.c cap32.h z80.h
+	psp-g++ $(CXXFLAGS) -c fdc.c
+
+tape.o: tape.c cap32.h tape.h z80.h
+	psp-g++ $(CXXFLAGS) -c tape.c
+
+psg.o: psg.c cap32.h z80.h
+	psp-g++ $(CXXFLAGS) -c psg.c
