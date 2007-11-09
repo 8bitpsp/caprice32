@@ -435,22 +435,7 @@ typedef struct {
 
 
 // cap32.cpp
-int  emulator_init();
 void emulator_reset(bool bolMF2Reset);
-void emulator_shutdown (void);
-
-void video_set_style(int half_pixels);
-
-void ga_memory_manager(void);
-
-int  dsk_load(char *pchFileName, t_drive *drive, char chID);
-void dsk_eject(t_drive *drive);
-
-int  snapshot_load(char *pchFileName);
-void tape_eject(void);
-
-int  printer_start(void);
-void printer_stop(void);
 
 // fdc.c
 void fdc_write_data(unsigned char val);

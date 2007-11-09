@@ -17,27 +17,9 @@
 
 #include "menu.h"
 #include "emulate.h"
+#include "cap32_psp.h"
 
-#include "cap32.h"
-#include "z80.h"
-
-extern t_CPC CPC;
-extern t_drive driveA;
-extern t_drive driveB;
-extern t_VDU VDU;
-extern byte *pbSndBuffer;
-extern byte bit_values[8];
-extern byte keyboard_matrix[16];
-
-int video_init();
-int audio_init();
-void audio_shutdown();
-
-#define MAX_DISK_FORMAT     2
-#define DEF_SPEED_SETTING   4
-#define DEFAULT_DISK_FORMAT 0
-
-dword freq_table[] = { 44100, 44100, 44100, 44100, 44100 };
+dword freq_table[] = { 44100 };
 
 PspImage *Screen = NULL;
 
@@ -72,6 +54,7 @@ fclose(foo);
   CPC.model = 2; // CPC 6128
   CPC.jumpers = 0x1e; // OEM is Amstrad, video refresh is 50Hz
   CPC.ram_size = 128 & 0x02c0; // 128KB RAM
+  CPC.speed = DEF_SPEED_SETTING; // original CPC speed
   CPC.limit_speed = 1;
   CPC.auto_pause = 1;
   CPC.printer = 0;
@@ -88,7 +71,7 @@ fclose(foo);
   CPC.scr_window = 0;
 
   CPC.snd_enabled = 1;
-  CPC.snd_playback_rate = 2;
+  CPC.snd_playback_rate = 0;
   CPC.snd_bits = 1;
   CPC.snd_stereo = 1;
   CPC.snd_volume = 80;
@@ -123,6 +106,9 @@ fclose(foo);
 //  strcpy(CPC.rom_file[0], "sorcery.sna");
 
   z80_init_tables(); // init Z80 emulation
+
+  /* Clear keyboard matrix */
+  memset(keyboard_matrix, 0xff, sizeof(keyboard_matrix));
 
   if (video_init()) return 0;
   if (audio_init()) return 0;

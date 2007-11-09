@@ -160,14 +160,15 @@
    May 23, 2004 - 17:48 dropped double buffer scheme in favour of a back buffer/custom blit operation; fixed colour palette init in 8bpp mode; added support for half size render mode; back buffer is cleared in video_init(); replaced the SDL_Flip operation with an SDL_BlitSurface; initial ExitCondition is now EC_FRAME_COMPLETE to ensure we have a valid video memory pointer to start with
    May 24, 2004 - 00:49 reintroduced snapshot_load & snapshot_save; modified vdu_init to update the two SDL_Rect structures to center or crop the CPC screen; introduced the dwXScale var to support the half size render mode
    May 29, 2004 - 18:09 reintroduced tape_eject, tape_insert and tape_insert_voc; added sound support via the native SDL audio routines
-   Nov 11, 2007 - 17:22 moved system-dependent stuff to cap32_sdl.cpp (Akop Karapetyan)
 */
 
 #include <zlib.h>
+#include "SDL.h"
 
 #include "cap32.h"
 #include "crtc.h"
 #include "tape.h"
+#include "video.h"
 #include "z80.h"
 
 #define VERSION_STRING "v4.2.0"
@@ -235,6 +236,11 @@ extern word MaxVSync;
 extern t_flags1 flags1;
 extern t_new_dt new_dt;
 
+SDL_AudioSpec *audio_spec = NULL;
+
+SDL_Surface *back_surface = NULL;
+video_plugin* vid_plugin;
+
 dword dwTicks, dwTicksOffset, dwTicksTarget, dwTicksTargetFPS;
 dword dwFPS, dwFrameCount;
 dword dwXScale, dwYScale;
@@ -263,11 +269,23 @@ FILE *pfileObject;
 FILE *pfoPrinter;
 
 #ifdef DEBUG
+#define DEBUG_KEY SDLK_F9
 dword dwDebugFlag = 0;
 FILE *pfoDebug;
 #endif
 
-double colours_rgb[32][3] = {
+#define MAX_FREQ_ENTRIES 5
+dword freq_table[MAX_FREQ_ENTRIES] = {
+   11025,
+   22050,
+   44100,
+   48000,
+   96000
+};
+
+#include "font.c"
+
+static double colours_rgb[32][3] = {
    { 0.5, 0.5, 0.5 }, { 0.5, 0.5, 0.5 },{ 0.0, 1.0, 0.5 }, { 1.0, 1.0, 0.5 },
    { 0.0, 0.0, 0.5 }, { 1.0, 0.0, 0.5 },{ 0.0, 0.5, 0.5 }, { 1.0, 0.5, 0.5 },
    { 1.0, 0.0, 0.5 }, { 1.0, 1.0, 0.5 },{ 1.0, 1.0, 0.0 }, { 1.0, 1.0, 1.0 },
@@ -278,7 +296,7 @@ double colours_rgb[32][3] = {
    { 0.5, 0.0, 0.0 }, { 0.5, 0.0, 1.0 },{ 0.5, 0.5, 0.0 }, { 0.5, 0.5, 1.0 }
 };
 
-double colours_green[32] = {
+static double colours_green[32] = {
    0.5647, 0.5647, 0.7529, 0.9412,
    0.1882, 0.3765, 0.4706, 0.6588,
    0.3765, 0.9412, 0.9098, 0.9725,
@@ -289,7 +307,9 @@ double colours_green[32] = {
    0.2510, 0.3137, 0.5333, 0.5961
 };
 
-byte bit_values[8] = {
+SDL_Color colours[32];
+
+static byte bit_values[8] = {
    0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80
 };
 
@@ -925,6 +945,483 @@ static dword cpc_kbd[3][149] = {
    }
 };
 
+#define MOD_PC_SHIFT    (KMOD_SHIFT << 16)
+#define MOD_PC_CTRL     (KMOD_CTRL << 16)
+#define MOD_PC_MODE     (KMOD_MODE << 16)
+
+#define KBD_MAX_ENTRIES 160
+static int kbd_layout[4][KBD_MAX_ENTRIES][2] = {
+   { // US PC to CPC keyboard layout translation
+      { CPC_0,          SDLK_0 },
+      { CPC_1,          SDLK_1 },
+      { CPC_2,          SDLK_2 },
+      { CPC_3,          SDLK_3 },
+      { CPC_4,          SDLK_4 },
+      { CPC_5,          SDLK_5 },
+      { CPC_6,          SDLK_6 },
+      { CPC_7,          SDLK_7 },
+      { CPC_8,          SDLK_8 },
+      { CPC_9,          SDLK_9 },
+      { CPC_A,          SDLK_a | MOD_PC_SHIFT },
+      { CPC_B,          SDLK_b | MOD_PC_SHIFT },
+      { CPC_C,          SDLK_c | MOD_PC_SHIFT },
+      { CPC_D,          SDLK_d | MOD_PC_SHIFT },
+      { CPC_E,          SDLK_e | MOD_PC_SHIFT },
+      { CPC_F,          SDLK_f | MOD_PC_SHIFT },
+      { CPC_G,          SDLK_g | MOD_PC_SHIFT },
+      { CPC_H,          SDLK_h | MOD_PC_SHIFT },
+      { CPC_I,          SDLK_i | MOD_PC_SHIFT },
+      { CPC_J,          SDLK_j | MOD_PC_SHIFT },
+      { CPC_K,          SDLK_k | MOD_PC_SHIFT },
+      { CPC_L,          SDLK_l | MOD_PC_SHIFT },
+      { CPC_M,          SDLK_m | MOD_PC_SHIFT },
+      { CPC_N,          SDLK_n | MOD_PC_SHIFT },
+      { CPC_O,          SDLK_o | MOD_PC_SHIFT },
+      { CPC_P,          SDLK_p | MOD_PC_SHIFT },
+      { CPC_Q,          SDLK_q | MOD_PC_SHIFT },
+      { CPC_R,          SDLK_r | MOD_PC_SHIFT },
+      { CPC_S,          SDLK_s | MOD_PC_SHIFT },
+      { CPC_T,          SDLK_t | MOD_PC_SHIFT },
+      { CPC_U,          SDLK_u | MOD_PC_SHIFT },
+      { CPC_V,          SDLK_v | MOD_PC_SHIFT },
+      { CPC_W,          SDLK_w | MOD_PC_SHIFT },
+      { CPC_X,          SDLK_x | MOD_PC_SHIFT },
+      { CPC_Y,          SDLK_y | MOD_PC_SHIFT },
+      { CPC_Z,          SDLK_z | MOD_PC_SHIFT },
+      { CPC_a,          SDLK_a },
+      { CPC_b,          SDLK_b },
+      { CPC_c,          SDLK_c },
+      { CPC_d,          SDLK_d },
+      { CPC_e,          SDLK_e },
+      { CPC_f,          SDLK_f },
+      { CPC_g,          SDLK_g },
+      { CPC_h,          SDLK_h },
+      { CPC_i,          SDLK_i },
+      { CPC_j,          SDLK_j },
+      { CPC_k,          SDLK_k },
+      { CPC_l,          SDLK_l },
+      { CPC_m,          SDLK_m },
+      { CPC_n,          SDLK_n },
+      { CPC_o,          SDLK_o },
+      { CPC_p,          SDLK_p },
+      { CPC_q,          SDLK_q },
+      { CPC_r,          SDLK_r },
+      { CPC_s,          SDLK_s },
+      { CPC_t,          SDLK_t },
+      { CPC_u,          SDLK_u },
+      { CPC_v,          SDLK_v },
+      { CPC_w,          SDLK_w },
+      { CPC_x,          SDLK_x },
+      { CPC_y,          SDLK_y },
+      { CPC_z,          SDLK_z },
+      { CPC_AMPERSAND,  SDLK_7 | MOD_PC_SHIFT },
+      { CPC_ASTERISK,   SDLK_8 | MOD_PC_SHIFT },
+      { CPC_AT,         SDLK_2 | MOD_PC_SHIFT },
+      { CPC_BACKQUOTE,  SDLK_BACKQUOTE },
+      { CPC_BACKSLASH,  SDLK_BACKSLASH },
+      { CPC_CAPSLOCK,   SDLK_CAPSLOCK },
+      { CPC_CLR,        SDLK_DELETE },
+      { CPC_COLON,      SDLK_SEMICOLON | MOD_PC_SHIFT },
+      { CPC_COMMA,      SDLK_COMMA },
+      { CPC_CONTROL,    SDLK_LCTRL },
+      { CPC_COPY,       SDLK_LALT },
+      { CPC_CPY_DOWN,   SDLK_DOWN | MOD_PC_SHIFT },
+      { CPC_CPY_LEFT,   SDLK_LEFT | MOD_PC_SHIFT },
+      { CPC_CPY_RIGHT,  SDLK_RIGHT | MOD_PC_SHIFT },
+      { CPC_CPY_UP,     SDLK_UP | MOD_PC_SHIFT },
+      { CPC_CUR_DOWN,   SDLK_DOWN },
+      { CPC_CUR_LEFT,   SDLK_LEFT },
+      { CPC_CUR_RIGHT,  SDLK_RIGHT },
+      { CPC_CUR_UP,     SDLK_UP },
+      { CPC_CUR_ENDBL,  SDLK_END | MOD_PC_CTRL },
+      { CPC_CUR_HOMELN, SDLK_HOME },
+      { CPC_CUR_ENDLN,  SDLK_END },
+      { CPC_CUR_HOMEBL, SDLK_HOME | MOD_PC_CTRL },
+      { CPC_DBLQUOTE,   SDLK_QUOTE | MOD_PC_SHIFT },
+      { CPC_DEL,        SDLK_BACKSPACE },
+      { CPC_DOLLAR,     SDLK_4 | MOD_PC_SHIFT },
+      { CPC_ENTER,      SDLK_KP_ENTER },
+      { CPC_EQUAL,      SDLK_EQUALS },
+      { CPC_ESC,        SDLK_ESCAPE },
+      { CPC_EXCLAMATN,  SDLK_1 | MOD_PC_SHIFT },
+      { CPC_F0,         SDLK_KP0 },
+      { CPC_F1,         SDLK_KP1 },
+      { CPC_F2,         SDLK_KP2 },
+      { CPC_F3,         SDLK_KP3 },
+      { CPC_F4,         SDLK_KP4 },
+      { CPC_F5,         SDLK_KP5 },
+      { CPC_F6,         SDLK_KP6 },
+      { CPC_F7,         SDLK_KP7 },
+      { CPC_F8,         SDLK_KP8 },
+      { CPC_F9,         SDLK_KP9 },
+      { CPC_FPERIOD,    SDLK_KP_PERIOD },
+      { CPC_GREATER,    SDLK_PERIOD | MOD_PC_SHIFT },
+      { CPC_HASH,       SDLK_3 | MOD_PC_SHIFT },
+      { CPC_LBRACKET,   SDLK_LEFTBRACKET },
+      { CPC_LCBRACE,    SDLK_LEFTBRACKET | MOD_PC_SHIFT },
+      { CPC_LEFTPAREN,  SDLK_9 | MOD_PC_SHIFT },
+      { CPC_LESS,       SDLK_COMMA | MOD_PC_SHIFT },
+      { CPC_LSHIFT,     SDLK_LSHIFT },
+      { CPC_MINUS,      SDLK_MINUS },
+      { CPC_PERCENT,    SDLK_5 | MOD_PC_SHIFT },
+      { CPC_PERIOD,     SDLK_PERIOD },
+      { CPC_PIPE,       SDLK_BACKSLASH | MOD_PC_SHIFT },
+      { CPC_PLUS,       SDLK_EQUALS | MOD_PC_SHIFT },
+      { CPC_POUND,      0 },
+      { CPC_POWER,      SDLK_6 | MOD_PC_SHIFT },
+      { CPC_QUESTION,   SDLK_SLASH | MOD_PC_SHIFT },
+      { CPC_QUOTE,      SDLK_QUOTE },
+      { CPC_RBRACKET,   SDLK_RIGHTBRACKET },
+      { CPC_RCBRACE,    SDLK_RIGHTBRACKET | MOD_PC_SHIFT },
+      { CPC_RETURN,     SDLK_RETURN },
+      { CPC_RIGHTPAREN, SDLK_0 | MOD_PC_SHIFT },
+      { CPC_RSHIFT,     SDLK_RSHIFT },
+      { CPC_SEMICOLON,  SDLK_SEMICOLON },
+      { CPC_SLASH,      SDLK_SLASH },
+      { CPC_SPACE,      SDLK_SPACE },
+      { CPC_TAB,        SDLK_TAB },
+      { CPC_UNDERSCORE, SDLK_MINUS | MOD_PC_SHIFT },
+      { CAP32_EXIT,     SDLK_F10 },
+      { CAP32_FPS,      SDLK_F12 | MOD_PC_CTRL },
+      { CAP32_FULLSCRN, SDLK_F1 },
+      { CAP32_JOY,      SDLK_F8 | MOD_PC_CTRL },
+      { CAP32_LOADDRVA, SDLK_F6 },
+      { CAP32_LOADDRVB, SDLK_F7 },
+      { CAP32_LOADSNAP, SDLK_F2 },
+      { CAP32_LOADTAPE, SDLK_F3 },
+      { CAP32_MF2RESET, SDLK_F5 | MOD_PC_CTRL },
+      { CAP32_MF2STOP,  SDLK_F11 },
+      { CAP32_OPTIONS,  SDLK_F8 },
+      { CAP32_PAUSE,    SDLK_BREAK },
+      { CAP32_RESET,    SDLK_F5 },
+      { CAP32_SAVESNAP, SDLK_F4 },
+      { CAP32_SCRNSHOT, SDLK_PRINT },
+      { CAP32_SPEED,    SDLK_F12 },
+      { CAP32_TAPEPLAY, SDLK_F3 | MOD_PC_CTRL }
+   },
+   { // French PC to CPC keyboard layout translation
+      { CPC_0,          SDLK_WORLD_64 | MOD_PC_SHIFT },
+      { CPC_1,          SDLK_AMPERSAND | MOD_PC_SHIFT },
+      { CPC_2,          SDLK_WORLD_73 | MOD_PC_SHIFT},
+      { CPC_3,          SDLK_QUOTEDBL | MOD_PC_SHIFT },
+      { CPC_4,          SDLK_QUOTE | MOD_PC_SHIFT },
+      { CPC_5,          SDLK_LEFTPAREN | MOD_PC_SHIFT },
+      { CPC_6,          SDLK_MINUS | MOD_PC_SHIFT },
+      { CPC_7,          SDLK_WORLD_72 | MOD_PC_SHIFT },
+      { CPC_8,          SDLK_UNDERSCORE | MOD_PC_SHIFT },
+      { CPC_9,          SDLK_WORLD_71 | MOD_PC_SHIFT },
+      { CPC_A,          SDLK_a | MOD_PC_SHIFT },
+      { CPC_B,          SDLK_b | MOD_PC_SHIFT },
+      { CPC_C,          SDLK_c | MOD_PC_SHIFT },
+      { CPC_D,          SDLK_d | MOD_PC_SHIFT },
+      { CPC_E,          SDLK_e | MOD_PC_SHIFT },
+      { CPC_F,          SDLK_f | MOD_PC_SHIFT },
+      { CPC_G,          SDLK_g | MOD_PC_SHIFT },
+      { CPC_H,          SDLK_h | MOD_PC_SHIFT },
+      { CPC_I,          SDLK_i | MOD_PC_SHIFT },
+      { CPC_J,          SDLK_j | MOD_PC_SHIFT },
+      { CPC_K,          SDLK_k | MOD_PC_SHIFT },
+      { CPC_L,          SDLK_l | MOD_PC_SHIFT },
+      { CPC_M,          SDLK_m | MOD_PC_SHIFT },
+      { CPC_N,          SDLK_n | MOD_PC_SHIFT },
+      { CPC_O,          SDLK_o | MOD_PC_SHIFT },
+      { CPC_P,          SDLK_p | MOD_PC_SHIFT },
+      { CPC_Q,          SDLK_q | MOD_PC_SHIFT },
+      { CPC_R,          SDLK_r | MOD_PC_SHIFT },
+      { CPC_S,          SDLK_s | MOD_PC_SHIFT },
+      { CPC_T,          SDLK_t | MOD_PC_SHIFT },
+      { CPC_U,          SDLK_u | MOD_PC_SHIFT },
+      { CPC_V,          SDLK_v | MOD_PC_SHIFT },
+      { CPC_W,          SDLK_w | MOD_PC_SHIFT },
+      { CPC_X,          SDLK_x | MOD_PC_SHIFT },
+      { CPC_Y,          SDLK_y | MOD_PC_SHIFT },
+      { CPC_Z,          SDLK_z | MOD_PC_SHIFT },
+      { CPC_a,          SDLK_a },
+      { CPC_b,          SDLK_b },
+      { CPC_c,          SDLK_c },
+      { CPC_d,          SDLK_d },
+      { CPC_e,          SDLK_e },
+      { CPC_f,          SDLK_f },
+      { CPC_g,          SDLK_g },
+      { CPC_h,          SDLK_h },
+      { CPC_i,          SDLK_i },
+      { CPC_j,          SDLK_j },
+      { CPC_k,          SDLK_k },
+      { CPC_l,          SDLK_l },
+      { CPC_m,          SDLK_m },
+      { CPC_n,          SDLK_n },
+      { CPC_o,          SDLK_o },
+      { CPC_p,          SDLK_p },
+      { CPC_q,          SDLK_q },
+      { CPC_r,          SDLK_r },
+      { CPC_s,          SDLK_s },
+      { CPC_t,          SDLK_t },
+      { CPC_u,          SDLK_u },
+      { CPC_v,          SDLK_v },
+      { CPC_w,          SDLK_w },
+      { CPC_x,          SDLK_x },
+      { CPC_y,          SDLK_y },
+      { CPC_z,          SDLK_z },
+      { CPC_AMPERSAND,  SDLK_AMPERSAND },
+      { CPC_ASTERISK,   SDLK_ASTERISK },
+      { CPC_AT,         SDLK_WORLD_64 | MOD_PC_MODE },
+      { CPC_BACKQUOTE,  SDLK_WORLD_73 | MOD_PC_MODE },
+      { CPC_BACKSLASH,  SDLK_UNDERSCORE | MOD_PC_MODE },
+      { CPC_CAPSLOCK,   SDLK_CAPSLOCK },
+      { CPC_CLR,        SDLK_DELETE },
+      { CPC_COLON,      SDLK_COLON },
+      { CPC_COMMA,      SDLK_COMMA },
+      { CPC_CONTROL,    SDLK_LCTRL },
+      { CPC_COPY,       SDLK_LALT },
+      { CPC_CPY_DOWN,   SDLK_DOWN | MOD_PC_SHIFT },
+      { CPC_CPY_LEFT,   SDLK_LEFT | MOD_PC_SHIFT },
+      { CPC_CPY_RIGHT,  SDLK_RIGHT | MOD_PC_SHIFT },
+      { CPC_CPY_UP,     SDLK_UP | MOD_PC_SHIFT },
+      { CPC_CUR_DOWN,   SDLK_DOWN },
+      { CPC_CUR_LEFT,   SDLK_LEFT },
+      { CPC_CUR_RIGHT,  SDLK_RIGHT },
+      { CPC_CUR_UP,     SDLK_UP },
+      { CPC_CUR_ENDBL,  SDLK_END | MOD_PC_CTRL },
+      { CPC_CUR_HOMELN, SDLK_HOME },
+      { CPC_CUR_ENDLN,  SDLK_END },
+      { CPC_CUR_HOMEBL, SDLK_HOME | MOD_PC_CTRL },
+      { CPC_DBLQUOTE,   SDLK_QUOTEDBL  },
+      { CPC_DEL,        SDLK_BACKSPACE },
+      { CPC_DOLLAR,     SDLK_DOLLAR },
+      { CPC_ENTER,      SDLK_KP_ENTER },
+      { CPC_EQUAL,      SDLK_EQUALS },
+      { CPC_ESC,        SDLK_ESCAPE },
+      { CPC_EXCLAMATN,  SDLK_EXCLAIM },
+      { CPC_F0,         SDLK_KP0 },
+      { CPC_F1,         SDLK_KP1 },
+      { CPC_F2,         SDLK_KP2 },
+      { CPC_F3,         SDLK_KP3 },
+      { CPC_F4,         SDLK_KP4 },
+      { CPC_F5,         SDLK_KP5 },
+      { CPC_F6,         SDLK_KP6 },
+      { CPC_F7,         SDLK_KP7 },
+      { CPC_F8,         SDLK_KP8 },
+      { CPC_F9,         SDLK_KP9 },
+      { CPC_FR_aGRAVE,  SDLK_WORLD_64 },
+      { CPC_FR_cCEDIL,  SDLK_WORLD_71 },
+      { CPC_FR_eACUTE,  SDLK_WORLD_72 },
+      { CPC_FR_eGRAVE,  SDLK_WORLD_73 },
+      { CPC_FR_uGRAVE,  SDLK_WORLD_89 },
+      { CPC_FPERIOD,    SDLK_KP_PERIOD },
+      { CPC_GREATER,    SDLK_LESS | MOD_PC_SHIFT },
+      { CPC_HASH,       SDLK_QUOTEDBL | MOD_PC_MODE },
+      { CPC_LBRACKET,   SDLK_LEFTPAREN | MOD_PC_MODE },
+      { CPC_LCBRACE,    SDLK_QUOTE | MOD_PC_MODE },
+      { CPC_LEFTPAREN,  SDLK_LEFTPAREN },
+      { CPC_LESS,       SDLK_LESS },
+      { CPC_LSHIFT,     SDLK_LSHIFT },
+      { CPC_MINUS,      SDLK_MINUS },
+      { CPC_PERCENT,    SDLK_WORLD_89 | MOD_PC_SHIFT },
+      { CPC_PERIOD,     SDLK_SEMICOLON | MOD_PC_SHIFT },
+      { CPC_PIPE,       SDLK_MINUS | MOD_PC_MODE },
+      { CPC_PLUS,       SDLK_EQUALS | MOD_PC_SHIFT },
+      { CPC_POUND,      SDLK_DOLLAR | MOD_PC_SHIFT },
+      { CPC_POWER,      SDLK_CARET },
+      { CPC_QUESTION,   SDLK_COMMA | MOD_PC_SHIFT },
+      { CPC_QUOTE,      SDLK_QUOTE },
+      { CPC_RBRACKET,   SDLK_RIGHTPAREN | MOD_PC_MODE },
+      { CPC_RCBRACE,    SDLK_EQUALS | MOD_PC_MODE },
+      { CPC_RETURN,     SDLK_RETURN },
+      { CPC_RIGHTPAREN, SDLK_RIGHTPAREN },
+      { CPC_RSHIFT,     SDLK_RSHIFT },
+      { CPC_SEMICOLON,  SDLK_SEMICOLON },
+      { CPC_SLASH,      SDLK_COLON | MOD_PC_SHIFT },
+      { CPC_SPACE,      SDLK_SPACE },
+      { CPC_TAB,        SDLK_TAB },
+      { CPC_UNDERSCORE, SDLK_UNDERSCORE },
+      { CAP32_EXIT,     SDLK_F10 },
+      { CAP32_FPS,      SDLK_F12 | MOD_PC_CTRL },
+      { CAP32_FULLSCRN, SDLK_F1 },
+      { CAP32_JOY,      SDLK_F8 | MOD_PC_CTRL },
+      { CAP32_LOADDRVA, SDLK_F6 },
+      { CAP32_LOADDRVB, SDLK_F7 },
+      { CAP32_LOADSNAP, SDLK_F2 },
+      { CAP32_LOADTAPE, SDLK_F3 },
+      { CAP32_MF2RESET, SDLK_F5 | MOD_PC_CTRL },
+      { CAP32_MF2STOP,  SDLK_F11 },
+      { CAP32_OPTIONS,  SDLK_F8 },
+      { CAP32_PAUSE,    SDLK_BREAK },
+      { CAP32_RESET,    SDLK_F5 },
+      { CAP32_SAVESNAP, SDLK_F4 },
+      { CAP32_SCRNSHOT, SDLK_PRINT },
+      { CAP32_SPEED,    SDLK_F12 },
+      { CAP32_TAPEPLAY, SDLK_F3 | MOD_PC_CTRL }
+   },
+   { // Spanish PC to CPC keyboard layout translation
+      { CPC_0,          SDLK_0 },
+      { CPC_1,          SDLK_1 },
+      { CPC_2,          SDLK_2 },
+      { CPC_3,          SDLK_3 },
+      { CPC_4,          SDLK_4 },
+      { CPC_5,          SDLK_5 },
+      { CPC_6,          SDLK_6 },
+      { CPC_7,          SDLK_7 },
+      { CPC_8,          SDLK_8 },
+      { CPC_9,          SDLK_9 },
+      { CPC_A,          SDLK_a | MOD_PC_SHIFT },
+      { CPC_B,          SDLK_b | MOD_PC_SHIFT },
+      { CPC_C,          SDLK_c | MOD_PC_SHIFT },
+      { CPC_D,          SDLK_d | MOD_PC_SHIFT },
+      { CPC_E,          SDLK_e | MOD_PC_SHIFT },
+      { CPC_F,          SDLK_f | MOD_PC_SHIFT },
+      { CPC_G,          SDLK_g | MOD_PC_SHIFT },
+      { CPC_H,          SDLK_h | MOD_PC_SHIFT },
+      { CPC_I,          SDLK_i | MOD_PC_SHIFT },
+      { CPC_J,          SDLK_j | MOD_PC_SHIFT },
+      { CPC_K,          SDLK_k | MOD_PC_SHIFT },
+      { CPC_L,          SDLK_l | MOD_PC_SHIFT },
+      { CPC_M,          SDLK_m | MOD_PC_SHIFT },
+      { CPC_N,          SDLK_n | MOD_PC_SHIFT },
+      { CPC_O,          SDLK_o | MOD_PC_SHIFT },
+      { CPC_P,          SDLK_p | MOD_PC_SHIFT },
+      { CPC_Q,          SDLK_q | MOD_PC_SHIFT },
+      { CPC_R,          SDLK_r | MOD_PC_SHIFT },
+      { CPC_S,          SDLK_s | MOD_PC_SHIFT },
+      { CPC_T,          SDLK_t | MOD_PC_SHIFT },
+      { CPC_U,          SDLK_u | MOD_PC_SHIFT },
+      { CPC_V,          SDLK_v | MOD_PC_SHIFT },
+      { CPC_W,          SDLK_w | MOD_PC_SHIFT },
+      { CPC_X,          SDLK_x | MOD_PC_SHIFT },
+      { CPC_Y,          SDLK_y | MOD_PC_SHIFT },
+      { CPC_Z,          SDLK_z | MOD_PC_SHIFT },
+      { CPC_a,          SDLK_a },
+      { CPC_b,          SDLK_b },
+      { CPC_c,          SDLK_c },
+      { CPC_d,          SDLK_d },
+      { CPC_e,          SDLK_e },
+      { CPC_f,          SDLK_f },
+      { CPC_g,          SDLK_g },
+      { CPC_h,          SDLK_h },
+      { CPC_i,          SDLK_i },
+      { CPC_j,          SDLK_j },
+      { CPC_k,          SDLK_k },
+      { CPC_l,          SDLK_l },
+      { CPC_m,          SDLK_m },
+      { CPC_n,          SDLK_n },
+      { CPC_o,          SDLK_o },
+      { CPC_p,          SDLK_p },
+      { CPC_q,          SDLK_q },
+      { CPC_r,          SDLK_r },
+      { CPC_s,          SDLK_s },
+      { CPC_t,          SDLK_t },
+      { CPC_u,          SDLK_u },
+      { CPC_v,          SDLK_v },
+      { CPC_w,          SDLK_w },
+      { CPC_x,          SDLK_x },
+      { CPC_y,          SDLK_y },
+      { CPC_z,          SDLK_z },
+      { CPC_AMPERSAND,  SDLK_7 | MOD_PC_SHIFT },
+      { CPC_ASTERISK,   SDLK_8 | MOD_PC_SHIFT },
+      { CPC_AT,         SDLK_2 | MOD_PC_SHIFT },
+      { CPC_BACKQUOTE,  SDLK_BACKQUOTE },
+      { CPC_BACKSLASH,  SDLK_BACKSLASH },
+      { CPC_CAPSLOCK,   SDLK_CAPSLOCK },
+      { CPC_CLR,        SDLK_DELETE },
+      { CPC_COLON,      SDLK_SEMICOLON | MOD_PC_SHIFT },
+      { CPC_COMMA,      SDLK_COMMA },
+      { CPC_CONTROL,    SDLK_LCTRL },
+      { CPC_COPY,       SDLK_LALT },
+      { CPC_CPY_DOWN,   SDLK_DOWN | MOD_PC_SHIFT },
+      { CPC_CPY_LEFT,   SDLK_LEFT | MOD_PC_SHIFT },
+      { CPC_CPY_RIGHT,  SDLK_RIGHT | MOD_PC_SHIFT },
+      { CPC_CPY_UP,     SDLK_UP | MOD_PC_SHIFT },
+      { CPC_CUR_DOWN,   SDLK_DOWN },
+      { CPC_CUR_LEFT,   SDLK_LEFT },
+      { CPC_CUR_RIGHT,  SDLK_RIGHT },
+      { CPC_CUR_UP,     SDLK_UP },
+      { CPC_CUR_ENDBL,  SDLK_END | MOD_PC_CTRL },
+      { CPC_CUR_HOMELN, SDLK_HOME },
+      { CPC_CUR_ENDLN,  SDLK_END },
+      { CPC_CUR_HOMEBL, SDLK_HOME | MOD_PC_CTRL },
+      { CPC_DBLQUOTE,   SDLK_QUOTE | MOD_PC_SHIFT },
+      { CPC_DEL,        SDLK_BACKSPACE },
+      { CPC_DOLLAR,     SDLK_4 | MOD_PC_SHIFT },
+      { CPC_ENTER,      SDLK_KP_ENTER },
+      { CPC_EQUAL,      SDLK_EQUALS },
+      { CPC_ESC,        SDLK_ESCAPE },
+      { CPC_EXCLAMATN,  SDLK_1 | MOD_PC_SHIFT },
+      { CPC_F0,         SDLK_KP0 },
+      { CPC_F1,         SDLK_KP1 },
+      { CPC_F2,         SDLK_KP2 },
+      { CPC_F3,         SDLK_KP3 },
+      { CPC_F4,         SDLK_KP4 },
+      { CPC_F5,         SDLK_KP5 },
+      { CPC_F6,         SDLK_KP6 },
+      { CPC_F7,         SDLK_KP7 },
+      { CPC_F8,         SDLK_KP8 },
+      { CPC_F9,         SDLK_KP9 },
+      { CPC_FPERIOD,    SDLK_KP_PERIOD },
+      { CPC_GREATER,    SDLK_PERIOD | MOD_PC_SHIFT },
+      { CPC_HASH,       SDLK_3 | MOD_PC_SHIFT },
+      { CPC_LBRACKET,   SDLK_LEFTBRACKET },
+      { CPC_LCBRACE,    SDLK_LEFTBRACKET | MOD_PC_SHIFT },
+      { CPC_LEFTPAREN,  SDLK_9 | MOD_PC_SHIFT },
+      { CPC_LESS,       SDLK_COMMA | MOD_PC_SHIFT },
+      { CPC_LSHIFT,     SDLK_LSHIFT },
+      { CPC_MINUS,      SDLK_MINUS },
+      { CPC_PERCENT,    SDLK_5 | MOD_PC_SHIFT },
+      { CPC_PERIOD,     SDLK_PERIOD },
+      { CPC_PIPE,       SDLK_BACKSLASH | MOD_PC_SHIFT },
+      { CPC_PLUS,       SDLK_EQUALS | MOD_PC_SHIFT },
+      { CPC_POUND,      0 },
+      { CPC_POWER,      SDLK_6 | MOD_PC_SHIFT },
+      { CPC_QUESTION,   SDLK_SLASH | MOD_PC_SHIFT },
+      { CPC_QUOTE,      SDLK_QUOTE },
+      { CPC_RBRACKET,   SDLK_RIGHTBRACKET },
+      { CPC_RCBRACE,    SDLK_RIGHTBRACKET | MOD_PC_SHIFT },
+      { CPC_RETURN,     SDLK_RETURN },
+      { CPC_RIGHTPAREN, SDLK_0 | MOD_PC_SHIFT },
+      { CPC_RSHIFT,     SDLK_RSHIFT },
+      { CPC_SEMICOLON,  SDLK_SEMICOLON },
+      { CPC_SLASH,      SDLK_SLASH },
+      { CPC_SPACE,      SDLK_SPACE },
+      { CPC_TAB,        SDLK_TAB },
+      { CPC_UNDERSCORE, SDLK_MINUS | MOD_PC_SHIFT },
+      { CAP32_EXIT,     SDLK_F10 },
+      { CAP32_FPS,      SDLK_F12 | MOD_PC_CTRL },
+      { CAP32_FULLSCRN, SDLK_F1 },
+      { CAP32_JOY,      SDLK_F8 | MOD_PC_CTRL },
+      { CAP32_LOADDRVA, SDLK_F6 },
+      { CAP32_LOADDRVB, SDLK_F7 },
+      { CAP32_LOADSNAP, SDLK_F2 },
+      { CAP32_LOADTAPE, SDLK_F3 },
+      { CAP32_MF2RESET, SDLK_F5 | MOD_PC_CTRL },
+      { CAP32_MF2STOP,  SDLK_F11 },
+      { CAP32_OPTIONS,  SDLK_F8 },
+      { CAP32_PAUSE,    SDLK_BREAK },
+      { CAP32_RESET,    SDLK_F5 },
+      { CAP32_SAVESNAP, SDLK_F4 },
+      { CAP32_SCRNSHOT, SDLK_PRINT },
+      { CAP32_SPEED,    SDLK_F12 },
+      { CAP32_TAPEPLAY, SDLK_F3 | MOD_PC_CTRL }
+   }
+};
+
+static dword keyboard_normal[SDLK_LAST];
+static dword keyboard_shift[SDLK_LAST];
+static dword keyboard_ctrl[SDLK_LAST];
+static dword keyboard_mode[SDLK_LAST];
+
+static int joy_layout[12][2] = {
+   { CPC_J0_UP,      SDLK_UP },
+   { CPC_J0_DOWN,    SDLK_DOWN },
+   { CPC_J0_LEFT,    SDLK_LEFT },
+   { CPC_J0_RIGHT,   SDLK_RIGHT },
+   { CPC_J0_FIRE1,   SDLK_z },
+   { CPC_J0_FIRE2,   SDLK_x },
+   { CPC_J1_UP,      0 },
+   { CPC_J1_DOWN,    0 },
+   { CPC_J1_LEFT,    0 },
+   { CPC_J1_RIGHT,   0 },
+   { CPC_J1_FIRE1,   0 },
+   { CPC_J1_FIRE2,   0 }
+};
+
 #define MAX_ROM_MODS 2
 #include "rom_mods.c"
 
@@ -1062,6 +1559,556 @@ void ga_memory_manager (void)
    }
    if (!(GateArray.ROM_config & 0x08)) { // upper/expansion ROM is enabled?
       membank_read[3] = pbExpansionROM; // 'page in' upper/expansion ROM
+   }
+}
+
+
+
+byte z80_IN_handler (reg_pair port)
+{
+   byte ret_val;
+
+   ret_val = 0xff; // default return value
+// CRTC -----------------------------------------------------------------------
+   if (!(port.b.h & 0x40)) { // CRTC chip select?
+      if ((port.b.h & 3) == 3) { // read CRTC register?
+         if ((CRTC.reg_select > 11) && (CRTC.reg_select < 18)) { // valid range?
+            ret_val = CRTC.registers[CRTC.reg_select];
+         }
+         else {
+            ret_val = 0; // write only registers return 0
+         }
+      }
+   }
+// PPI ------------------------------------------------------------------------
+   else if (!(port.b.h & 0x08)) { // PPI chip select?
+      byte ppi_port = port.b.h & 3;
+      switch (ppi_port) {
+         case 0: // read from port A?
+            if (PPI.control & 0x10) { // port A set to input?
+               if ((PSG.control & 0xc0) == 0x40) { // PSG control set to read?
+                  if (PSG.reg_select < 16) { // within valid range?
+                     if (PSG.reg_select == 14) { // PSG port A?
+                        if (!(PSG.RegisterAY.Index[7] & 0x40)) { // port A in input mode?
+                           ret_val = keyboard_matrix[CPC.keyboard_line & 0x0f]; // read keyboard matrix node status
+                        } else {
+                           ret_val = PSG.RegisterAY.Index[14] & (keyboard_matrix[CPC.keyboard_line & 0x0f]); // return last value w/ logic AND of input
+                        }
+                     } else if (PSG.reg_select == 15) { // PSG port B?
+                        if ((PSG.RegisterAY.Index[7] & 0x80)) { // port B in output mode?
+                           ret_val = PSG.RegisterAY.Index[15]; // return stored value
+                        }
+                     } else {
+                        ret_val = PSG.RegisterAY.Index[PSG.reg_select]; // read PSG register
+                     }
+                  }
+               }
+            } else {
+               ret_val = PPI.portA; // return last programmed value
+            }
+            break;
+
+         case 1: // read from port B?
+            if (PPI.control & 2) { // port B set to input?
+               ret_val = bTapeLevel | // tape level when reading
+                         (CPC.printer ? 0 : 0x40) | // ready line of connected printer
+                         (CPC.jumpers & 0x7f) | // manufacturer + 50Hz
+								 (CRTC.flag_invsync ? 1 : 0); // VSYNC status
+            } else {
+               ret_val = PPI.portB; // return last programmed value
+            }
+            break;
+
+         case 2: // read from port C?
+            byte direction = PPI.control & 9; // isolate port C directions
+            ret_val = PPI.portC; // default to last programmed value
+            if (direction) { // either half set to input?
+               if (direction & 8) { // upper half set to input?
+                  ret_val &= 0x0f; // blank out upper half
+                  byte val = PPI.portC & 0xc0; // isolate PSG control bits
+                  if (val == 0xc0) { // PSG specify register?
+                     val = 0x80; // change to PSG write register
+                  }
+                  ret_val |= val | 0x20; // casette write data is always set
+                  if (CPC.tape_motor) {
+                     ret_val |= 0x10; // set the bit if the tape motor is running
+                  }
+               }
+               if (!(direction & 1)) { // lower half set to output?
+                  ret_val |= 0x0f; // invalid - set all bits
+               }
+            }
+            break;
+      }
+   }
+// ----------------------------------------------------------------------------
+   else if (!(port.b.h & 0x04)) { // external peripheral?
+      if ((port.b.h == 0xfb) && (!(port.b.l & 0x80))) { // FDC?
+         if (!(port.b.l & 0x01)) { // FDC status register?
+            ret_val = fdc_read_status();
+         } else { // FDC data register
+            ret_val = fdc_read_data();
+         }
+      }
+   }
+   return ret_val;
+}
+
+
+
+void z80_OUT_handler (reg_pair port, byte val)
+{
+// Gate Array -----------------------------------------------------------------
+   if ((port.b.h & 0xc0) == 0x40) { // GA chip select?
+      switch (val >> 6) {
+         case 0: // select pen
+            #ifdef DEBUG_GA
+            if (dwDebugFlag) {
+               fprintf(pfoDebug, "pen 0x%02x\r\n", val);
+            }
+            #endif
+            GateArray.pen = val & 0x10 ? 0x10 : val & 0x0f; // if bit 5 is set, pen indexes the border colour
+            if (CPC.mf2) { // MF2 enabled?
+               *(pbMF2ROM + 0x03fcf) = val;
+            }
+            break;
+         case 1: // set colour
+            #ifdef DEBUG_GA
+            if (dwDebugFlag) {
+               fprintf(pfoDebug, "clr 0x%02x\r\n", val);
+            }
+            #endif
+            {
+               byte colour = val & 0x1f; // isolate colour value
+               GateArray.ink_values[GateArray.pen] = colour;
+               GateArray.palette[GateArray.pen] = SDL_MapRGB(back_surface->format,
+                colours[colour].r, colours[colour].g, colours[colour].b);
+               if (GateArray.pen < 2) {
+                  byte r = ((dword)colours[GateArray.ink_values[0]].r + (dword)colours[GateArray.ink_values[1]].r) >> 1;
+                  byte g = ((dword)colours[GateArray.ink_values[0]].g + (dword)colours[GateArray.ink_values[1]].g) >> 1;
+                  byte b = ((dword)colours[GateArray.ink_values[0]].b + (dword)colours[GateArray.ink_values[1]].b) >> 1;
+                  GateArray.palette[18] = SDL_MapRGB(back_surface->format, r, g, b); // update the mode 2 'anti-aliasing' colour
+               }
+            }
+            if (CPC.mf2) { // MF2 enabled?
+               int iPen = *(pbMF2ROM + 0x03fcf);
+               *(pbMF2ROM + (0x03f90 | ((iPen & 0x10) << 2) | (iPen & 0x0f))) = val;
+            }
+            break;
+         case 2: // set mode
+            #ifdef DEBUG_GA
+            if (dwDebugFlag) {
+               fprintf(pfoDebug, "rom 0x%02x\r\n", val);
+            }
+            #endif
+            GateArray.ROM_config = val;
+            GateArray.requested_scr_mode = val & 0x03; // request a new CPC screen mode
+            ga_memory_manager();
+            if (val & 0x10) { // delay Z80 interrupt?
+               z80.int_pending = 0; // clear pending interrupts
+               GateArray.sl_count = 0; // reset GA scanline counter
+            }
+            if (CPC.mf2) { // MF2 enabled?
+               *(pbMF2ROM + 0x03fef) = val;
+            }
+            break;
+         case 3: // set memory configuration
+            #ifdef DEBUG_GA
+            if (dwDebugFlag) {
+               fprintf(pfoDebug, "mem 0x%02x\r\n", val);
+            }
+            #endif
+            GateArray.RAM_config = val;
+            ga_memory_manager();
+            if (CPC.mf2) { // MF2 enabled?
+               *(pbMF2ROM + 0x03fff) = val;
+            }
+            break;
+      }
+   }
+// CRTC -----------------------------------------------------------------------
+   if (!(port.b.h & 0x40)) { // CRTC chip select?
+      byte crtc_port = port.b.h & 3;
+      if (crtc_port == 0) { // CRTC register select?
+         CRTC.reg_select = val;
+         if (CPC.mf2) { // MF2 enabled?
+            *(pbMF2ROM + 0x03cff) = val;
+         }
+      }
+      else if (crtc_port == 1) { // CRTC write data?
+         if (CRTC.reg_select < 16) { // only registers 0 - 15 can be written to
+            switch (CRTC.reg_select) {
+               case 0: // horizontal total
+                  CRTC.registers[0] = val;
+                  break;
+               case 1: // horizontal displayed
+                  CRTC.registers[1] = val;
+                  update_skew();
+                  break;
+               case 2: // horizontal sync position
+                  CRTC.registers[2] = val;
+                  break;
+               case 3: // sync width
+                  CRTC.registers[3] = val;
+                  CRTC.hsw = val & 0x0f; // isolate horizontal sync width
+                  CRTC.vsw = val >> 4; // isolate vertical sync width
+                  break;
+               case 4: // vertical total
+                  CRTC.registers[4] = val & 0x7f;
+                  if (CRTC.CharInstMR == (void(*)(void))CharMR2) {
+                     if (CRTC.line_count == CRTC.registers[4]) { // matches vertical total?
+                        if (CRTC.raster_count == CRTC.registers[9]) { // matches maximum raster address?
+                           CRTC.flag_startvta = 1;
+                        }
+                     }
+                  }
+                  break;
+               case 5: // vertical total adjust
+                  CRTC.registers[5] = val & 0x1f;
+                  break;
+               case 6: // vertical displayed
+                  CRTC.registers[6] = val & 0x7f;
+                  if (CRTC.line_count == CRTC.registers[6]) { // matches vertical displayed?
+                     new_dt.NewDISPTIMG = 0;
+                  }
+                  break;
+               case 7: // vertical sync position
+                  CRTC.registers[7] = val & 0x7f;
+                  {
+                     register dword temp = 0;
+                     if (CRTC.line_count == CRTC.registers[7]) { // matches vertical sync position?
+                        temp++;
+                        if (CRTC.r7match != temp) {
+                           CRTC.r7match = temp;
+                           if (CRTC.char_count >= 2) {
+                              CRTC.flag_resvsync = 0;
+                              if (!CRTC.flag_invsync) {
+                                 CRTC.vsw_count = 0;
+                                 CRTC.flag_invsync = 1;
+                                 flags1.monVSYNC = 26;
+                                 GateArray.hs_count = 2; // GA delays its VSYNC by two CRTC HSYNCs
+                              }
+                           }
+                        }
+                     }
+                     else {
+                        CRTC.r7match = 0;
+                     }
+                  }
+                  break;
+               case 8: // interlace and skew
+                  CRTC.registers[8] = val;
+                  update_skew();
+                  break;
+               case 9: // maximum raster count
+                  CRTC.registers[9] = val & 0x1f;
+                  {
+                     register dword temp = 0;
+                     if (CRTC.raster_count == CRTC.registers[9]) { // matches maximum raster address?
+                        temp = 1;
+                        CRTC.flag_resscan = 1; // request a raster counter reset
+                     }
+                     if (CRTC.r9match != temp) {
+                        CRTC.r9match = temp;
+                        if (temp) {
+                           CRTC.CharInstMR = (void(*)(void))CharMR1;
+                        }
+                     }
+                     if (CRTC.raster_count == CRTC.registers[9]) { // matches maximum raster address?
+                        if (CRTC.char_count == CRTC.registers[1]) {
+                           CRTC.next_addr = CRTC.addr + CRTC.char_count;
+                        }
+                        if (CRTC.char_count == CRTC.registers[0]) { // matches horizontal total?
+                           CRTC.flag_reschar = 1; // request a line count update
+                        }
+                        if (!CRTC.flag_startvta) {
+                           CRTC.flag_resscan = 1;
+                        }
+                     } else {
+                        if (!CRTC.flag_invta) { // not in vertical total adjust?
+                           CRTC.flag_resscan = 0;
+                        }
+                     }
+                  }
+                  break;
+               case 10: // cursor start raster
+                  CRTC.registers[10] = val & 0x7f;
+                  break;
+               case 11: // cursor end raster
+                  CRTC.registers[11] = val & 0x1f;
+                  break;
+               case 12: // start address high byte
+                  CRTC.registers[12] = val & 0x3f;
+                  CRTC.requested_addr = CRTC.registers[13] + (CRTC.registers[12] << 8);
+                  break;
+               case 13: // start address low byte
+                  CRTC.registers[13] = val;
+                  CRTC.requested_addr = CRTC.registers[13] + (CRTC.registers[12] << 8);
+                  break;
+               case 14: // cursor address high byte
+                  CRTC.registers[14] = val & 0x3f;
+                  break;
+               case 15: // cursor address low byte
+                  CRTC.registers[15] = val;
+                  break;
+            }
+         }
+         if (CPC.mf2) { // MF2 enabled?
+            *(pbMF2ROM + (0x03db0 | (*(pbMF2ROM + 0x03cff) & 0x0f))) = val;
+         }
+         #ifdef DEBUG_CRTC
+         if (dwDebugFlag) {
+            fprintf(pfoDebug, "%02x = %02x\r\n", CRTC.reg_select, val);
+         }
+         #endif
+      }
+   }
+// ROM select -----------------------------------------------------------------
+   if (!(port.b.h & 0x20)) { // ROM select?
+      GateArray.upper_ROM = val;
+      pbExpansionROM = memmap_ROM[val];
+      if (pbExpansionROM == NULL) { // selected expansion ROM not present?
+         pbExpansionROM = pbROMhi; // revert to BASIC ROM
+      }
+      if (!(GateArray.ROM_config & 0x08)) { // upper/expansion ROM is enabled?
+         membank_read[3] = pbExpansionROM; // 'page in' upper/expansion ROM
+      }
+      if (CPC.mf2) { // MF2 enabled?
+         *(pbMF2ROM + 0x03aac) = val;
+      }
+   }
+// printer port ---------------------------------------------------------------
+   if (!(port.b.h & 0x10)) { // printer port?
+      CPC.printer_port = val ^ 0x80; // invert bit 7
+      if (pfoPrinter) {
+         if (!(CPC.printer_port & 0x80)) { // only grab data bytes; ignore the strobe signal
+            fputc(CPC.printer_port, pfoPrinter); // capture printer output to file
+         }
+      }
+   }
+// PPI ------------------------------------------------------------------------
+   if (!(port.b.h & 0x08)) { // PPI chip select?
+      switch (port.b.h & 3) {
+         case 0: // write to port A?
+            PPI.portA = val;
+            if (!(PPI.control & 0x10)) { // port A set to output?
+               byte psg_data = val;
+               psg_write
+            }
+            break;
+         case 1: // write to port B?
+            PPI.portB = val;
+            break;
+         case 2: // write to port C?
+            PPI.portC = val;
+            if (!(PPI.control & 1)) { // output lower half?
+               CPC.keyboard_line = val;
+            }
+            if (!(PPI.control & 8)) { // output upper half?
+               CPC.tape_motor = val & 0x10; // update tape motor control
+               PSG.control = val; // change PSG control
+               byte psg_data = PPI.portA;
+               psg_write
+            }
+            break;
+         case 3: // modify PPI control
+            if (val & 0x80) { // change PPI configuration
+               PPI.control = val; // update control byte
+               PPI.portA = 0; // clear data for all ports
+               PPI.portB = 0;
+               PPI.portC = 0;
+            } else { // bit manipulation of port C data
+               if (val & 1) { // set bit?
+                  byte bit = (val >> 1) & 7; // isolate bit to set
+                  PPI.portC |= bit_values[bit]; // set requested bit
+                  if (!(PPI.control & 1)) { // output lower half?
+                     CPC.keyboard_line = PPI.portC;
+                  }
+                  if (!(PPI.control & 8)) { // output upper half?
+                     CPC.tape_motor = PPI.portC & 0x10;
+                     PSG.control = PPI.portC; // change PSG control
+                     byte psg_data = PPI.portA;
+                     psg_write
+                  }
+               } else {
+                  byte bit = (val >> 1) & 7; // isolate bit to reset
+                  PPI.portC &= ~(bit_values[bit]); // reset requested bit
+                  if (!(PPI.control & 1)) { // output lower half?
+                     CPC.keyboard_line = PPI.portC;
+                  }
+                  if (!(PPI.control & 8)) { // output upper half?
+                     CPC.tape_motor = PPI.portC & 0x10;
+                     PSG.control = PPI.portC; // change PSG control
+                     byte psg_data = PPI.portA;
+                     psg_write
+                  }
+               }
+            }
+            if (CPC.mf2) { // MF2 enabled?
+               *(pbMF2ROM + 0x037ff) = val;
+            }
+            break;
+      }
+   }
+// ----------------------------------------------------------------------------
+   if ((port.b.h == 0xfa) && (!(port.b.l & 0x80))) { // floppy motor control?
+      FDC.motor = val & 0x01;
+      #ifdef DEBUG_FDC
+      fputs(FDC.motor ? "\r\n--- motor on" : "\r\n--- motor off", pfoDebug);
+      #endif
+      FDC.flags |= STATUSDRVA_flag | STATUSDRVB_flag;
+   }
+   else if ((port.b.h == 0xfb) && (!(port.b.l & 0x80))) { // FDC data register?
+      fdc_write_data(val);
+   }
+   else if ((CPC.mf2) && (port.b.h == 0xfe)) { // Multiface 2?
+      if ((port.b.l == 0xe8) && (!(dwMF2Flags & MF2_INVISIBLE))) { // page in MF2 ROM?
+         dwMF2Flags |= MF2_ACTIVE;
+         ga_memory_manager();
+      }
+      else if (port.b.l == 0xea) { // page out MF2 ROM?
+         dwMF2Flags &= ~MF2_ACTIVE;
+         ga_memory_manager();
+      }
+   }
+}
+
+
+
+void print (dword *pdwAddr, char *pchStr, bool bolColour)
+{
+   int iLen, iIdx, iRow, iCol;
+   dword dwColour;
+   word wColour;
+   byte bRow, bColour;
+
+   switch (CPC.scr_bpp)
+   {
+      case 32:
+         dwColour = bolColour ? 0x00ffffff : 0;
+         iLen = strlen(pchStr); // number of characters to process
+         for (int n = 0; n < iLen; n++) {
+            dword *pdwLine, *pdwPixel;
+            iIdx = (int)pchStr[n]; // get the ASCII value
+            if ((iIdx < FNT_MIN_CHAR) || (iIdx > FNT_MAX_CHAR)) { // limit it to the range of chars in the font
+               iIdx = FNT_BAD_CHAR;
+            }
+            iIdx -= FNT_MIN_CHAR; // zero base the index
+            pdwLine = pdwAddr; // keep a reference to the current screen position
+            for (iRow = 0; iRow < FNT_CHAR_HEIGHT; iRow++) { // loop for all rows in the font character
+               pdwPixel = pdwLine;
+               bRow = bFont[iIdx]; // get the bitmap information for one row
+               for (iCol = 0; iCol < FNT_CHAR_WIDTH; iCol++) { // loop for all columns in the font character
+                  if (bRow & 0x80) { // is the bit set?
+                     *(pdwPixel+1) = 0; // draw the "shadow"
+                     *(pdwPixel+CPC.scr_line_offs) = 0;
+                     *(pdwPixel+CPC.scr_line_offs+1) = 0;
+                     *pdwPixel = dwColour; // draw the character pixel
+                  }
+                  pdwPixel++; // update the screen position
+                  bRow <<= 1; // advance to the next bit
+               }
+               pdwLine += CPC.scr_line_offs; // advance to next screen line
+               iIdx += FNT_CHARS; // advance to next row in font data
+            }
+            pdwAddr += FNT_CHAR_WIDTH; // set screen address to next character position
+         }
+         break;
+
+      case 24:
+         dwColour = bolColour ? 0x00ffffff : 0;
+         iLen = strlen(pchStr); // number of characters to process
+         for (int n = 0; n < iLen; n++) {
+            dword *pdwLine;
+            byte *pbPixel;
+            iIdx = (int)pchStr[n]; // get the ASCII value
+            if ((iIdx < FNT_MIN_CHAR) || (iIdx > FNT_MAX_CHAR)) { // limit it to the range of chars in the font
+               iIdx = FNT_BAD_CHAR;
+            }
+            iIdx -= FNT_MIN_CHAR; // zero base the index
+            pdwLine = pdwAddr; // keep a reference to the current screen position
+            for (iRow = 0; iRow < FNT_CHAR_HEIGHT; iRow++) { // loop for all rows in the font character
+               pbPixel = (byte *)pdwLine;
+               bRow = bFont[iIdx]; // get the bitmap information for one row
+               for (iCol = 0; iCol < FNT_CHAR_WIDTH; iCol++) { // loop for all columns in the font character
+                  if (bRow & 0x80) { // is the bit set?
+                     *((dword *)pbPixel+CPC.scr_line_offs) = 0; // draw the "shadow"
+                     *(dword *)pbPixel = dwColour; // draw the character pixel
+                  }
+                  pbPixel += 3; // update the screen position
+                  bRow <<= 1; // advance to the next bit
+               }
+               pdwLine += CPC.scr_line_offs; // advance to next screen line
+               iIdx += FNT_CHARS; // advance to next row in font data
+            }
+            pdwAddr += FNT_CHAR_WIDTH-2; // set screen address to next character position
+         }
+         break;
+
+      case 15:
+      case 16:
+         wColour = bolColour ? 0xffff : 0;
+         iLen = strlen(pchStr); // number of characters to process
+         for (int n = 0; n < iLen; n++) {
+            dword *pdwLine;
+            word *pwPixel;
+            iIdx = (int)pchStr[n]; // get the ASCII value
+            if ((iIdx < FNT_MIN_CHAR) || (iIdx > FNT_MAX_CHAR)) { // limit it to the range of chars in the font
+               iIdx = FNT_BAD_CHAR;
+            }
+            iIdx -= FNT_MIN_CHAR; // zero base the index
+            pdwLine = pdwAddr; // keep a reference to the current screen position
+            for (iRow = 0; iRow < FNT_CHAR_HEIGHT; iRow++) { // loop for all rows in the font character
+               pwPixel = (word *)pdwLine;
+               bRow = bFont[iIdx]; // get the bitmap information for one row
+               for (iCol = 0; iCol < FNT_CHAR_WIDTH; iCol++) { // loop for all columns in the font character
+                  if (bRow & 0x80) { // is the bit set?
+                     *(pwPixel+1) = 0; // draw the "shadow"
+                     *(word *)((dword *)pwPixel+CPC.scr_line_offs) = 0;
+                     *((word *)((dword *)pwPixel+CPC.scr_line_offs)+1) = 0;
+                     *pwPixel = wColour; // draw the character pixel
+                  }
+                  pwPixel++; // update the screen position
+                  bRow <<= 1; // advance to the next bit
+               }
+               pdwLine += CPC.scr_line_offs; // advance to next screen line
+               iIdx += FNT_CHARS; // advance to next row in font data
+            }
+            pdwAddr += FNT_CHAR_WIDTH/2; // set screen address to next character position
+         }
+         break;
+
+      case 8:
+         bColour = bolColour ? SDL_MapRGB(back_surface->format,255,255,255) : SDL_MapRGB(back_surface->format,0,0,0);
+         iLen = strlen(pchStr); // number of characters to process
+         for (int n = 0; n < iLen; n++) {
+            dword *pdwLine;
+            byte *pbPixel;
+            iIdx = (int)pchStr[n]; // get the ASCII value
+            if ((iIdx < FNT_MIN_CHAR) || (iIdx > FNT_MAX_CHAR)) { // limit it to the range of chars in the font
+               iIdx = FNT_BAD_CHAR;
+            }
+            iIdx -= FNT_MIN_CHAR; // zero base the index
+            pdwLine = pdwAddr; // keep a reference to the current screen position
+            for (iRow = 0; iRow < FNT_CHAR_HEIGHT; iRow++) { // loop for all rows in the font character
+               pbPixel = (byte *)pdwLine;
+               bRow = bFont[iIdx]; // get the bitmap information for one row
+               for (iCol = 0; iCol < FNT_CHAR_WIDTH; iCol++) { // loop for all columns in the font character
+                  if (bRow & 0x80) { // is the bit set?
+                     *(pbPixel+1) = 0; // draw the "shadow"
+                     *(byte *)((dword *)pbPixel+CPC.scr_line_offs) = 0;
+                     *((byte *)((dword *)pbPixel+CPC.scr_line_offs)+1) = 0;
+                     *pbPixel = bColour; // draw the character pixel
+                  }
+                  pbPixel++; // update the screen position
+                  bRow <<= 1; // advance to the next bit
+               }
+               pdwLine += CPC.scr_line_offs; // advance to next screen line
+               iIdx += FNT_CHARS; // advance to next row in font data
+            }
+            pdwAddr += FNT_CHAR_WIDTH/4; // set screen address to next character position
+         }
+         break;
    }
 }
 
@@ -2524,19 +3571,167 @@ void printer_stop (void)
 
 
 
-void video_set_style(int half_pixels)
+void audio_update (void *userdata, byte *stream, int len)
 {
-   switch (half_pixels) {
+   memcpy(stream, pbSndBuffer, len);
+   dwSndBufferCopied = 1;
+}
+
+
+
+int audio_align_samples (int given)
+{
+   int actual = 1;
+   while (actual < given) {
+      actual <<= 1;
+   }
+   return actual; // return the closest match as 2^n
+}
+
+
+
+
+int audio_init (void)
+{
+   SDL_AudioSpec *desired, *obtained;
+
+   if (!CPC.snd_enabled) {
+      return 0;
+   }
+
+   desired = (SDL_AudioSpec *)malloc(sizeof(SDL_AudioSpec));
+   obtained = (SDL_AudioSpec *)malloc(sizeof(SDL_AudioSpec));
+
+   desired->freq = freq_table[CPC.snd_playback_rate];
+   desired->format = CPC.snd_bits ? AUDIO_S16LSB : AUDIO_S8;
+   desired->channels = CPC.snd_stereo+1;
+   desired->samples = audio_align_samples(desired->freq / 50); // desired is 20ms at the given frequency
+   desired->callback = audio_update;
+   desired->userdata = NULL;
+
+   if (SDL_OpenAudio(desired, obtained) < 0) {
+      fprintf(stderr, "Could not open audio: %s\n", SDL_GetError());
+      return 1;
+   }
+
+   free(desired);
+   audio_spec = obtained;
+
+   CPC.snd_buffersize = audio_spec->size; // size is samples * channels * bytes per sample (1 or 2)
+   pbSndBuffer = (byte *)malloc(CPC.snd_buffersize); // allocate the sound data buffer
+   pbSndBufferEnd = pbSndBuffer + CPC.snd_buffersize;
+   memset(pbSndBuffer, 0, CPC.snd_buffersize);
+   CPC.snd_bufferptr = pbSndBuffer; // init write cursor
+
+   InitAY();
+
+   for (int n = 0; n < 16; n++) {
+      SetAYRegister(n, PSG.RegisterAY.Index[n]); // init sound emulation with valid values
+   }
+
+   return 0;
+}
+
+
+
+void audio_shutdown (void)
+{
+   SDL_CloseAudio();
+   if (pbSndBuffer) {
+      free(pbSndBuffer);
+   }
+   if (audio_spec) {
+      free(audio_spec);
+   }
+}
+
+
+
+void audio_pause (void)
+{
+   if (CPC.snd_enabled) {
+      SDL_PauseAudio(1);
+   }
+}
+
+
+
+void audio_resume (void)
+{
+   if (CPC.snd_enabled) {
+      SDL_PauseAudio(0);
+   }
+}
+
+
+
+int video_set_palette (void)
+{
+            int n;
+
+         if (!CPC.scr_tube) {
+            int n;
+            for (n = 0; n < 32; n++) {
+               dword red = (dword)(colours_rgb[n][0] * (CPC.scr_intensity / 10.0) * 255);
+               if (red > 255) { // limit to the maximum
+                  red = 255;
+               }
+               dword green = (dword)(colours_rgb[n][1] * (CPC.scr_intensity / 10.0) * 255);
+               if (green > 255) {
+                  green = 255;
+               }
+               dword blue = (dword)(colours_rgb[n][2] * (CPC.scr_intensity / 10.0) * 255);
+               if (blue > 255) {
+                  blue = 255;
+               }
+               colours[n].r = red;
+               colours[n].g = green;
+               colours[n].b = blue;
+            }
+         } else {
+            int n;
+            for (n = 0; n < 32; n++) {
+               dword green = (dword)(colours_green[n] * (CPC.scr_intensity / 10.0) * 255);
+               if (green > 255) {
+                  green = 255;
+               }
+               colours[n].r = 0;
+               colours[n].g = green;
+               colours[n].b = 0;
+         }
+         }
+
+	vid_plugin->set_palette(colours);
+
+   for (n = 0; n < 17; n++) { // loop for all colours + border
+		int i=GateArray.ink_values[n];
+		GateArray.palette[n] = SDL_MapRGB(back_surface->format,colours[i].r,colours[i].g,colours[i].b);
+   }
+
+   return 0;
+}
+
+
+
+void video_set_style (void)
+{
+   if (vid_plugin->half_pixels)
+   {
+      dwXScale = 1;
+      dwYScale = 1;
+   }
+   else
+   {
+      dwXScale = 2;
+      dwYScale = 1;
+   }
+   switch (dwXScale) {
       case 1:
-         dwXScale = 1;
-         dwYScale = 1;
          CPC.scr_prerendernorm = (void(*)(void))prerender_normal_half;
          CPC.scr_prerenderbord = (void(*)(void))prerender_border_half;
          CPC.scr_prerendersync = (void(*)(void))prerender_sync_half;
          break;
       case 2:
-         dwXScale = 2;
-         dwYScale = 1;
          CPC.scr_prerendernorm = (void(*)(void))prerender_normal;
          CPC.scr_prerenderbord = (void(*)(void))prerender_border;
          CPC.scr_prerendersync = (void(*)(void))prerender_sync;
@@ -2562,6 +3757,129 @@ void video_set_style(int half_pixels)
                CPC.scr_render = (void(*)(void))render8bpp;
                break;
    }
+}
+
+
+int video_init (void)
+{
+   if (SDL_InitSubSystem(SDL_INIT_VIDEO) < 0) { // initialize the video subsystem
+      return ERR_VIDEO_INIT;
+   }
+
+   vid_plugin=&video_plugin_list[CPC.scr_style];
+
+   back_surface=vid_plugin->init(CPC.scr_fs_width, CPC.scr_fs_height, CPC.scr_fs_bpp, CPC.scr_window==0);
+   if (!back_surface) { // attempt to set the required video mode
+      fprintf(stderr, "Could not set requested video mode: %s\n", SDL_GetError());
+      return ERR_VIDEO_SET_MODE;
+   }
+
+   CPC.scr_bpp = back_surface->format->BitsPerPixel; // bit depth of the surface
+   video_set_style(); // select rendering style
+
+   int iErrCode = video_set_palette(); // init CPC colours
+   if (iErrCode) {
+      return iErrCode;
+   }
+
+   vid_plugin->lock();
+
+   CPC.scr_bps = back_surface->pitch / 4; // rendered screen line length (changing bytes to dwords)
+   CPC.scr_line_offs = CPC.scr_bps * dwYScale;
+   CPC.scr_pos =
+   CPC.scr_base = (dword *)back_surface->pixels; // memory address of back buffer
+
+   vid_plugin->unlock();
+
+   SDL_ShowCursor(SDL_DISABLE); // hide the mouse cursor
+
+   SDL_WM_SetCaption("Caprice32 " VERSION_STRING, "Caprice32");
+
+   return 0;
+}
+
+
+
+void video_shutdown (void)
+{
+   if (back_surface) {
+      vid_plugin->unlock();
+   }
+   vid_plugin->close();
+   SDL_QuitSubSystem(SDL_INIT_VIDEO);
+}
+
+
+
+void video_display (void)
+{
+   vid_plugin->flip();
+}
+
+
+
+void input_swap_joy (void) {
+   dword n, pc_idx, val;
+
+   for (n = 0; n < 6; n++) {
+      pc_idx = joy_layout[n][1]; // get the PC key to change the assignment for
+      if (pc_idx) {
+         val = keyboard_normal[pc_idx]; // keep old value
+         keyboard_normal[pc_idx] = cpc_kbd[CPC.keyboard][joy_layout[n][0]]; // assign new function
+         cpc_kbd[CPC.keyboard][joy_layout[n][0]] = val; // store old value
+      }
+   }
+}
+
+
+
+int input_init (void)
+{
+   dword n, pc_key, pc_idx, cpc_idx, cpc_key;
+
+   memset(keyboard_normal, 0xff, sizeof(keyboard_normal));
+   memset(keyboard_shift, 0xff, sizeof(keyboard_shift));
+   memset(keyboard_ctrl, 0xff, sizeof(keyboard_ctrl));
+   memset(keyboard_mode, 0xff, sizeof(keyboard_mode));
+
+   for (n = 0; n < KBD_MAX_ENTRIES; n++) {
+      pc_key = kbd_layout[CPC.kbd_layout][n][1]; // PC key assigned to CPC key
+      if (pc_key) {
+         pc_idx = pc_key & 0xffff; // strip off modifier
+         cpc_idx = kbd_layout[CPC.kbd_layout][n][0];
+         if (cpc_idx & MOD_EMU_KEY) {
+            cpc_key = cpc_idx;
+         } else {
+            cpc_key = cpc_kbd[CPC.keyboard][cpc_idx];
+         }
+         if (pc_key & MOD_PC_SHIFT) { // key + SHIFT?
+            keyboard_shift[pc_idx] = cpc_key; // copy CPC key matrix value to SHIFT table
+         } else if (pc_key & MOD_PC_CTRL) { // key + CTRL?
+            keyboard_ctrl[pc_idx] = cpc_key; // copy CPC key matrix value to CTRL table
+         } else if (pc_key & MOD_PC_MODE) { // key + AltGr?
+            keyboard_mode[pc_idx] = cpc_key; // copy CPC key matrix value to AltGr table
+         } else {
+            keyboard_normal[pc_idx] = cpc_key; // copy CPC key matrix value to normal table
+            if (!(cpc_key & MOD_EMU_KEY)) { // not an emulator function key?
+               if (keyboard_shift[pc_idx] == 0xffffffff) { // SHIFT table entry has no value yet?
+                  keyboard_shift[pc_idx] = cpc_key; // duplicate entry in SHIFT table
+               }
+               if (keyboard_ctrl[pc_idx] == 0xffffffff) { // CTRL table entry has no value yet?
+                  keyboard_ctrl[pc_idx] = cpc_key | MOD_CPC_CTRL; // duplicate entry in CTRL table
+               }
+               if (keyboard_mode[pc_idx] == 0xffffffff) { // AltGr table entry has no value yet?
+                  keyboard_mode[pc_idx] = cpc_key; // duplicate entry in AltGr table
+               }
+            }
+         }
+      }
+   }
+
+   if (CPC.joysticks) { // enable keyboard joystick emulation?
+      input_swap_joy();
+   }
+
+   return 0;
 }
 
 
@@ -2628,6 +3946,226 @@ void getConfigValueString (char* pchFileName, char* pchSection, char* pchKey, ch
 
 
 
+void loadConfiguration (void)
+{
+   char chFileName[_MAX_PATH + 1];
+   char chPath[_MAX_PATH + 1];
+
+   strncpy(chFileName, chAppPath, sizeof(chFileName)-10);
+   strcat(chFileName, "/cap32.cfg");
+
+   memset(&CPC, 0, sizeof(CPC));
+   CPC.model = getConfigValueInt(chFileName, "system", "model", 2); // CPC 6128
+   if (CPC.model > 2) {
+      CPC.model = 2;
+   }
+   CPC.jumpers = getConfigValueInt(chFileName, "system", "jumpers", 0x1e) & 0x1e; // OEM is Amstrad, video refresh is 50Hz
+   CPC.ram_size = getConfigValueInt(chFileName, "system", "ram_size", 128) & 0x02c0; // 128KB RAM
+   if (CPC.ram_size > 576) {
+      CPC.ram_size = 576;
+   } else if ((CPC.model == 2) && (CPC.ram_size < 128)) {
+      CPC.ram_size = 128; // minimum RAM size for CPC 6128 is 128KB
+   }
+   CPC.speed = getConfigValueInt(chFileName, "system", "speed", DEF_SPEED_SETTING); // original CPC speed
+   if ((CPC.speed < MIN_SPEED_SETTING) || (CPC.speed > MAX_SPEED_SETTING)) {
+      CPC.speed = DEF_SPEED_SETTING;
+   }
+   CPC.limit_speed = 1;
+   CPC.auto_pause = getConfigValueInt(chFileName, "system", "auto_pause", 1) & 1;
+   CPC.printer = getConfigValueInt(chFileName, "system", "printer", 0) & 1;
+   CPC.mf2 = getConfigValueInt(chFileName, "system", "mf2", 0) & 1;
+   CPC.keyboard = getConfigValueInt(chFileName, "system", "keyboard", 0);
+   if (CPC.keyboard > MAX_ROM_MODS) {
+      CPC.keyboard = 0;
+   }
+   CPC.joysticks = getConfigValueInt(chFileName, "system", "joysticks", 0) & 1;
+
+   CPC.scr_fs_width = getConfigValueInt(chFileName, "video", "scr_width", 800);
+   CPC.scr_fs_height = getConfigValueInt(chFileName, "video", "scr_height", 600);
+   CPC.scr_fs_bpp = getConfigValueInt(chFileName, "video", "scr_bpp", 8);
+   CPC.scr_style = getConfigValueInt(chFileName, "video", "scr_style", 0);
+   unsigned i=0;
+   while((video_plugin_list[i+1].name!=NULL)&&(i<CPC.scr_style))
+   {
+      i++;
+   }
+   if (i!=CPC.scr_style) {
+      CPC.scr_style = 0;
+   }
+   CPC.scr_oglfilter = getConfigValueInt(chFileName, "video", "scr_oglfilter", 1) & 1;
+   CPC.scr_vsync = getConfigValueInt(chFileName, "video", "scr_vsync", 1) & 1;
+   CPC.scr_led = getConfigValueInt(chFileName, "video", "scr_led", 1) & 1;
+   CPC.scr_fps = getConfigValueInt(chFileName, "video", "scr_fps", 0) & 1;
+   CPC.scr_tube = getConfigValueInt(chFileName, "video", "scr_tube", 0) & 1;
+   CPC.scr_intensity = getConfigValueInt(chFileName, "video", "scr_intensity", 10);
+   CPC.scr_remanency = getConfigValueInt(chFileName, "video", "scr_remanency", 0) & 1;
+   if ((CPC.scr_intensity < 5) || (CPC.scr_intensity > 15)) {
+      CPC.scr_intensity = 10;
+   }
+   CPC.scr_window = getConfigValueInt(chFileName, "video", "scr_window", 0) & 1;
+
+   CPC.snd_enabled = getConfigValueInt(chFileName, "sound", "enabled", 1) & 1;
+   CPC.snd_playback_rate = getConfigValueInt(chFileName, "sound", "playback_rate", 2);
+   if (CPC.snd_playback_rate > (MAX_FREQ_ENTRIES-1)) {
+      CPC.snd_playback_rate = 2;
+   }
+   CPC.snd_bits = getConfigValueInt(chFileName, "sound", "bits", 1) & 1;
+   CPC.snd_stereo = getConfigValueInt(chFileName, "sound", "stereo", 1) & 1;
+   CPC.snd_volume = getConfigValueInt(chFileName, "sound", "volume", 80);
+   if ((CPC.snd_volume < 0) || (CPC.snd_volume > 100)) {
+      CPC.snd_volume = 80;
+   }
+   CPC.snd_pp_device = getConfigValueInt(chFileName, "sound", "pp_device", 0) & 1;
+
+   CPC.kbd_layout = getConfigValueInt(chFileName, "control", "kbd_layout", 0);
+   if (CPC.kbd_layout > 3) {
+      CPC.kbd_layout = 0;
+   }
+
+   CPC.max_tracksize = getConfigValueInt(chFileName, "file", "max_track_size", 6144-154);
+   strncpy(chPath, chAppPath, sizeof(chPath)-7);
+   strcat(chPath, "/snap");
+   getConfigValueString(chFileName, "file", "snap_path", CPC.snap_path, sizeof(CPC.snap_path)-1, chPath);
+   if (CPC.snap_path[0] == '\0') {
+      strcpy(CPC.snap_path, chPath);
+   }
+   getConfigValueString(chFileName, "file", "snap_file", CPC.snap_file, sizeof(CPC.snap_file)-1, "");
+   CPC.snap_zip = getConfigValueInt(chFileName, "file", "snap_zip", 0) & 1;
+   strncpy(chPath, chAppPath, sizeof(chPath)-7);
+   strcat(chPath, "/disk");
+   getConfigValueString(chFileName, "file", "drvA_path", CPC.drvA_path, sizeof(CPC.drvA_path)-1, chPath);
+   if (CPC.drvA_path[0] == '\0') {
+      strcpy(CPC.drvA_path, chPath);
+   }
+   getConfigValueString(chFileName, "file", "drvA_file", CPC.drvA_file, sizeof(CPC.drvA_file)-1, "");
+   CPC.drvA_zip = getConfigValueInt(chFileName, "file", "drvA_zip", 0) & 1;
+   CPC.drvA_format = getConfigValueInt(chFileName, "file", "drvA_format", DEFAULT_DISK_FORMAT);
+   getConfigValueString(chFileName, "file", "drvB_path", CPC.drvB_path, sizeof(CPC.drvB_path)-1, chPath);
+   if (CPC.drvB_path[0] == '\0') {
+      strcpy(CPC.drvB_path, chPath);
+   }
+   getConfigValueString(chFileName, "file", "drvB_file", CPC.drvB_file, sizeof(CPC.drvB_file)-1, "");
+   CPC.drvB_zip = getConfigValueInt(chFileName, "file", "drvB_zip", 0) & 1;
+   CPC.drvB_format = getConfigValueInt(chFileName, "file", "drvB_format", DEFAULT_DISK_FORMAT);
+   strncpy(chPath, chAppPath, sizeof(chPath)-7);
+   strcat(chPath, "/tape");
+   getConfigValueString(chFileName, "file", "tape_path", CPC.tape_path, sizeof(CPC.tape_path)-1, chPath);
+   if (CPC.tape_path[0] == '\0') {
+      strcpy(CPC.tape_path, chPath);
+   }
+   getConfigValueString(chFileName, "file", "tape_file", CPC.tape_file, sizeof(CPC.tape_file)-1, "");
+   CPC.tape_zip = getConfigValueInt(chFileName, "file", "tape_zip", 0) & 1;
+
+   int iFmt = FIRST_CUSTOM_DISK_FORMAT;
+   for (int i = iFmt; i < MAX_DISK_FORMAT; i++) { // loop through all user definable disk formats
+      dword dwVal;
+      char *pchTail;
+      char chFmtId[14];
+      disk_format[iFmt].label[0] = 0; // clear slot
+      sprintf(chFmtId, "fmt%02d", i); // build format ID
+      char chFmtStr[256];
+      getConfigValueString(chFileName, "file", chFmtId, chFmtStr, sizeof(chFmtStr)-1, "");
+      if (chFmtStr[0] != 0) { // found format definition for this slot?
+         char chDelimiters[] = ",";
+         char *pchToken;
+         pchToken = strtok(chFmtStr, chDelimiters); // format label
+         strncpy((char *)disk_format[iFmt].label, pchToken, sizeof(disk_format[iFmt].label)-1);
+         pchToken = strtok(NULL, chDelimiters); // number of tracks
+         if (pchToken == NULL) { // value missing?
+            continue;
+         }
+         dwVal = strtoul(pchToken, &pchTail, 0);
+         if ((dwVal < 1) || (dwVal > DSK_TRACKMAX)) { // invalid value?
+            continue;
+         }
+         disk_format[iFmt].tracks = dwVal;
+         pchToken = strtok(NULL, chDelimiters); // number of sides
+         if (pchToken == NULL) { // value missing?
+            continue;
+         }
+         dwVal = strtoul(pchToken, &pchTail, 0);
+         if ((dwVal < 1) || (dwVal > DSK_SIDEMAX)) { // invalid value?
+            continue;
+         }
+         disk_format[iFmt].sides = dwVal;
+         pchToken = strtok(NULL, chDelimiters); // number of sectors
+         if (pchToken == NULL) { // value missing?
+            continue;
+         }
+         dwVal = strtoul(pchToken, &pchTail, 0);
+         if ((dwVal < 1) || (dwVal > DSK_SECTORMAX)) { // invalid value?
+            continue;
+         }
+         disk_format[iFmt].sectors = dwVal;
+         pchToken = strtok(NULL, chDelimiters); // sector size as N value
+         if (pchToken == NULL) { // value missing?
+            continue;
+         }
+         dwVal = strtoul(pchToken, &pchTail, 0);
+         if ((dwVal < 1) || (dwVal > 6)) { // invalid value?
+            continue;
+         }
+         disk_format[iFmt].sector_size = dwVal;
+         pchToken = strtok(NULL, chDelimiters); // gap#3 length
+         if (pchToken == NULL) { // value missing?
+            continue;
+         }
+         dwVal = strtoul(pchToken, &pchTail, 0);
+         if ((dwVal < 1) || (dwVal > 255)) { // invalid value?
+            continue;
+         }
+         disk_format[iFmt].gap3_length = dwVal;
+         pchToken = strtok(NULL, chDelimiters); // filler byte
+         if (pchToken == NULL) { // value missing?
+            continue;
+         }
+         dwVal = strtoul(pchToken, &pchTail, 0);
+         disk_format[iFmt].filler_byte = (byte)dwVal;
+         for (int iSide = 0; iSide < (int)disk_format[iFmt].sides; iSide++) {
+            for (int iSector = 0; iSector < (int)disk_format[iFmt].sectors; iSector++) {
+               pchToken = strtok(NULL, chDelimiters); // sector ID
+               if (pchToken == NULL) { // value missing?
+                  dwVal = iSector+1;
+               } else {
+                  dwVal = strtoul(pchToken, &pchTail, 0);
+               }
+               disk_format[iFmt].sector_ids[iSide][iSector] = (byte)dwVal;
+            }
+         }
+         iFmt++; // entry is valid
+      }
+   }
+   strncpy(chPath, chAppPath, sizeof(chPath)-13);
+   strcat(chPath, "/printer.dat");
+   getConfigValueString(chFileName, "file", "printer_file", CPC.printer_file, sizeof(CPC.printer_file)-1, chPath);
+   if (CPC.printer_file[0] == '\0') {
+      strcpy(CPC.printer_file, chPath);
+   }
+   strncpy(chPath, chAppPath, sizeof(chPath)-12);
+   strcat(chPath, "/screen.png");
+   getConfigValueString(chFileName, "file", "sdump_file", CPC.sdump_file, sizeof(CPC.sdump_file)-1, chPath);
+   if (CPC.sdump_file[0] == '\0') {
+      strcpy(CPC.sdump_file, chPath);
+   }
+
+   strncpy(chPath, chAppPath, sizeof(chPath)-5);
+   strcat(chPath, "/rom");
+   getConfigValueString(chFileName, "rom", "rom_path", CPC.rom_path, sizeof(CPC.rom_path)-1, chPath);
+   for (int iRomNum = 0; iRomNum < 16; iRomNum++) { // loop for ROMs 0-15
+      char chRomId[14];
+      sprintf(chRomId, "slot%02d", iRomNum); // build ROM ID
+      getConfigValueString(chFileName, "rom", chRomId, CPC.rom_file[iRomNum], sizeof(CPC.rom_file[iRomNum])-1, "");
+   }
+   if (CPC.rom_path[0] == '\0') { // if the path is empty, set it to the default
+      strcpy(CPC.rom_path, chPath);
+   }
+   if ((pfileObject = fopen(chFileName, "rt")) == NULL) {
+      strcpy(CPC.rom_file[7], "amsdos.rom"); // insert AMSDOS in slot 7 if the config file does not exist yet
+   } else {
+      fclose(pfileObject);
+   }
+   getConfigValueString(chFileName, "rom", "rom_mf2", CPC.rom_mf2, sizeof(CPC.rom_mf2)-1, "");
+}
 
 
 
@@ -2666,3 +4204,511 @@ void splitPathFileName(char *pchCombined, char *pchPath, char *pchFile)
 
 
 
+void doCleanUp (void)
+{
+   printer_stop();
+   emulator_shutdown();
+
+   dsk_eject(&driveA);
+   dsk_eject(&driveB);
+   tape_eject();
+   if (zip_info.pchFileNames) {
+      free(zip_info.pchFileNames);
+   }
+
+   audio_shutdown();
+   video_shutdown();
+
+   #ifdef DEBUG
+   fclose(pfoDebug);
+   #endif
+
+   SDL_Quit();
+}
+
+
+
+int main (int argc, char **argv)
+{
+   dword dwOffset;
+   int iExitCondition;
+   bool bolDone;
+   SDL_Event event;
+
+   if (SDL_Init(SDL_INIT_AUDIO | SDL_INIT_TIMER | SDL_INIT_NOPARACHUTE) < 0) { // initialize SDL
+      fprintf(stderr, "SDL_Init() failed: %s\n", SDL_GetError());
+      exit(-1);
+   }
+   atexit(doCleanUp); // install the clean up routine
+
+   getcwd(chAppPath, sizeof(chAppPath)-1); // get the location of the executable
+
+   loadConfiguration(); // retrieve the emulator configuration
+   if (CPC.printer) {
+      if (!printer_start()) { // start capturing printer output, if enabled
+         CPC.printer = 0;
+      }
+   }
+
+   z80_init_tables(); // init Z80 emulation
+
+   if (input_init()) {
+      fprintf(stderr, "input_init() failed. Aborting.\n");
+      exit(-1);
+   }
+
+   if (video_init()) {
+      fprintf(stderr, "video_init() failed. Aborting.\n");
+      exit(-1);
+   }
+
+   if (audio_init()) {
+      fprintf(stderr, "audio_init() failed. Disabling sound.\n");
+      CPC.snd_enabled = 0; // disable sound emulation
+   }
+
+   if (emulator_init()) {
+      fprintf(stderr, "emulator_init() failed. Aborting.\n");
+      exit(-1);
+   }
+
+   #ifdef DEBUG
+   pfoDebug = fopen("./debug.txt", "wt");
+   #endif
+
+   bool have_DSK = false;
+   bool have_SNA = false;
+   bool have_TAP = false;
+   memset(&driveA, 0, sizeof(t_drive)); // clear disk drive A data structure
+   for (int i = 1; i < argc; i++) { // loop for all command line arguments
+      int length = strlen(argv[i]);
+      if (length > 5) { // minumum for a valid filename
+         char path[_MAX_PATH + 1];
+         char extension[5];
+         if (argv[i][0] == '"') { // argument passed with quotes?
+            length -= 2;
+            strncpy(path, &argv[i][1], length); // strip the quotes
+         } else {
+            strncpy(path, &argv[i][0], sizeof(path)-1); // take it as is
+         }
+         int pos = length - 4;
+         if (pos > 0) {
+            char file_name[_MAX_PATH + 1];
+            bool zip = false;
+            strncpy(extension, &path[pos], 4); // grab the extension
+            extension[4] = '\0'; // zero terminate string
+            if (strcasecmp(extension, ".zip") == 0) { // are we dealing with a zip archive?
+               zip_info.pchZipFile = path;
+               zip_info.pchExtension = ".dsk.sna.cdt.voc";
+               if (zip_dir(&zip_info)) {
+                  continue; // error or nothing relevant found
+               } else {
+                  strncpy(file_name, zip_info.pchFileNames, sizeof(file_name)-1); // name of the 1st file in the archive
+                  pos = strlen(file_name) - 4;
+                  strncpy(extension, &file_name[pos], 4); // grab the extension
+                  zip = true;
+               }
+            } else {
+               splitPathFileName(path, path, file_name); // split into components
+            }
+            if ((!have_DSK) && (strcasecmp(extension, ".dsk") == 0)) { // a disk image?
+               if (zip) {
+                  char chFileName[_MAX_PATH + 1];
+                  char *pchPtr = zip_info.pchFileNames;
+                  zip_info.dwOffset = *(dword *)(pchPtr + (strlen(pchPtr)+1)); // get the offset into the zip archive
+                  if (!zip_extract(path, chFileName, zip_info.dwOffset)) {
+                     if (!dsk_load(chFileName, &driveA, 'A')) {
+                        strcpy(CPC.drvA_path, path); // if the image loads, copy the infos to the config structure
+                        strcpy(CPC.drvA_file, file_name);
+                        CPC.drvA_zip = 1;
+                        have_DSK = true;
+                     }
+                     remove(chFileName);
+                  }
+               } else {
+                  strcat(path, file_name);
+                  if(!dsk_load(path, &driveA, 'A')) {
+                     strcpy(CPC.drvA_path, path);
+                     strcpy(CPC.drvA_file, file_name);
+                     CPC.drvA_zip = 0;
+                     have_DSK = true;
+                  }
+               }
+            }
+            if ((!have_SNA) && (strcasecmp(extension, ".sna") == 0)) {
+               if (zip) {
+                  char chFileName[_MAX_PATH + 1];
+                  char *pchPtr = zip_info.pchFileNames;
+                  zip_info.dwOffset = *(dword *)(pchPtr + (strlen(pchPtr)+1));
+                  if (!zip_extract(path, chFileName, zip_info.dwOffset)) {
+                     if (!snapshot_load(chFileName)) {
+                        strcpy(CPC.snap_path, path);
+                        strcpy(CPC.snap_file, file_name);
+                        CPC.snap_zip = 1;
+                        have_SNA = true;
+                     }
+                     remove(chFileName);
+                  }
+               } else {
+                  strcat(path, file_name);
+                  if(!snapshot_load(path)) {
+                     strcpy(CPC.snap_path, path);
+                     strcpy(CPC.snap_file, file_name);
+                     CPC.snap_zip = 0;
+                     have_SNA = true;
+                  }
+               }
+            }
+            if ((!have_TAP) && (strcasecmp(extension, ".cdt") == 0)) {
+               if (zip) {
+                  char chFileName[_MAX_PATH + 1];
+                  char *pchPtr = zip_info.pchFileNames;
+                  zip_info.dwOffset = *(dword *)(pchPtr + (strlen(pchPtr)+1));
+                  if (!zip_extract(path, chFileName, zip_info.dwOffset)) {
+                     if (!tape_insert(chFileName)) {
+                        strcpy(CPC.tape_path, path);
+                        strcpy(CPC.tape_file, file_name);
+                        CPC.tape_zip = 1;
+                        have_TAP = true;
+                     }
+                     remove(chFileName);
+                  }
+               } else {
+                  strcat(path, file_name);
+                  if(!tape_insert(path)) {
+                     strcpy(CPC.tape_path, path);
+                     strcpy(CPC.tape_file, file_name);
+                     CPC.tape_zip = 0;
+                     have_TAP = true;
+                  }
+               }
+            }
+            if ((!have_TAP) && (strcasecmp(extension, ".voc") == 0)) {
+               if (zip) {
+                  char chFileName[_MAX_PATH + 1];
+                  char *pchPtr = zip_info.pchFileNames;
+                  zip_info.dwOffset = *(dword *)(pchPtr + (strlen(pchPtr)+1));
+                  if (!zip_extract(path, chFileName, zip_info.dwOffset)) {
+                     if (!tape_insert_voc(chFileName)) {
+                        strcpy(CPC.tape_path, path);
+                        strcpy(CPC.tape_file, file_name);
+                        CPC.tape_zip = 1;
+                        have_TAP = true;
+                     }
+                     remove(chFileName);
+                  }
+               } else {
+                  strcat(path, file_name);
+                  if(!tape_insert_voc(path)) {
+                     strcpy(CPC.tape_path, path);
+                     strcpy(CPC.tape_file, file_name);
+                     CPC.tape_zip = 0;
+                     have_TAP = true;
+                  }
+               }
+            }
+         }
+      }
+   }
+
+   if ((!have_DSK) && (CPC.drvA_file[0])) { // insert disk in drive A?
+      char chFileName[_MAX_PATH + 1];
+      char *pchPtr;
+
+      if (CPC.drvA_zip) { // compressed image?
+         zip_info.pchZipFile = CPC.drvA_path; // pchPath already has path and zip file combined
+         zip_info.pchExtension = ".dsk";
+         if (!zip_dir(&zip_info)) { // parse the zip for relevant files
+            dword n;
+            pchPtr = zip_info.pchFileNames;
+            for (n = zip_info.iFiles; n; n--) { // loop through all entries
+               if (!strcasecmp(CPC.drvA_file, pchPtr)) { // do we have a match?
+                  break;
+               }
+               pchPtr += strlen(pchPtr) + 5; // skip offset
+            }
+            if (n) {
+               zip_info.dwOffset = *(dword *)(pchPtr + (strlen(pchPtr)+1)); // get the offset into the zip archive
+               if (!zip_extract(CPC.drvA_path, chFileName, zip_info.dwOffset)) {
+                  dsk_load(chFileName, &driveA, 'A');
+                  remove(chFileName);
+               }
+            }
+         } else {
+            CPC.drvA_zip = 0;
+         }
+      } else {
+         strncpy(chFileName, CPC.drvA_path, sizeof(chFileName)-1);
+         strncat(chFileName, CPC.drvA_file, sizeof(chFileName)-1 - strlen(chFileName));
+         dsk_load(chFileName, &driveA, 'A');
+      }
+   }
+   memset(&driveB, 0, sizeof(t_drive)); // clear disk drive B data structure
+   if (CPC.drvB_file[0]) { // insert disk in drive B?
+      char chFileName[_MAX_PATH + 1];
+      char *pchPtr;
+
+      if (CPC.drvB_zip) { // compressed image?
+         zip_info.pchZipFile = CPC.drvB_path; // pchPath already has path and zip file combined
+         zip_info.pchExtension = ".dsk";
+         if (!zip_dir(&zip_info)) { // parse the zip for relevant files
+            dword n;
+            pchPtr = zip_info.pchFileNames;
+            for (n = zip_info.iFiles; n; n--) { // loop through all entries
+               if (!strcasecmp(CPC.drvB_file, pchPtr)) { // do we have a match?
+                  break;
+               }
+               pchPtr += strlen(pchPtr) + 5; // skip offset
+            }
+            if (n) {
+               zip_info.dwOffset = *(dword *)(pchPtr + (strlen(pchPtr)+1)); // get the offset into the zip archive
+               if (!zip_extract(CPC.drvB_path, chFileName, zip_info.dwOffset)) {
+                  dsk_load(chFileName, &driveB, 'B');
+                  remove(chFileName);
+               }
+            }
+         }
+         else {
+            CPC.drvB_zip = 0;
+         }
+      }
+      else {
+         strncpy(chFileName, CPC.drvB_path, sizeof(chFileName)-1);
+         strncat(chFileName, CPC.drvB_file, sizeof(chFileName)-1 - strlen(chFileName));
+         dsk_load(chFileName, &driveB, 'B');
+      }
+   }
+   if ((!have_TAP) && (CPC.tape_file[0])) { // insert a tape?
+      int iErrorCode = 0;
+      char chFileName[_MAX_PATH + 1];
+      char *pchPtr;
+
+      if (CPC.tape_zip) { // compressed image?
+         zip_info.pchZipFile = CPC.tape_path; // pchPath already has path and zip file combined
+         zip_info.pchExtension = ".cdt.voc";
+         iErrorCode = zip_dir(&zip_info);
+         if (!iErrorCode) { // parse the zip for relevant files
+            dword n;
+            pchPtr = zip_info.pchFileNames;
+            for (n = zip_info.iFiles; n; n--) { // loop through all entries
+               if (!strcasecmp(CPC.tape_file, pchPtr)) { // do we have a match?
+                  break;
+               }
+               pchPtr += strlen(pchPtr) + 5; // skip offset
+            }
+            if (n) {
+               zip_info.dwOffset = *(dword *)(pchPtr + (strlen(pchPtr)+1)); // get the offset into the zip archive
+               iErrorCode = zip_extract(CPC.tape_path, chFileName, zip_info.dwOffset);
+            }
+            else {
+               CPC.tape_zip = 0;
+               iErrorCode = 1; // file not found
+            }
+         }
+         else {
+            CPC.tape_zip = 0;
+         }
+      }
+      else {
+         strncpy(chFileName, CPC.tape_path, sizeof(chFileName)-1);
+         strncat(chFileName, CPC.tape_file, sizeof(chFileName)-1 - strlen(chFileName));
+      }
+      if (!iErrorCode) {
+         int iOffset = strlen(CPC.tape_file) - 3;
+         char *pchExt = &CPC.tape_file[iOffset > 0 ? iOffset : 0]; // pointer to the extension
+         if (strncasecmp(pchExt, "cdt", 3) == 0) { // is it a cdt file?
+            iErrorCode = tape_insert(chFileName);
+         }
+         else if (strncasecmp(pchExt, "voc", 3) == 0) { // is it a voc file?
+            iErrorCode = tape_insert_voc(chFileName);
+         }
+         if (CPC.tape_zip) {
+            remove(chFileName); // dispose of the temp file
+         }
+      }
+   }
+
+// ----------------------------------------------------------------------------
+
+   dwTicksOffset = (int)(20.0 / (double)((CPC.speed * 25) / 100.0));
+   dwTicksTarget = SDL_GetTicks();
+   dwTicksTargetFPS = dwTicksTarget;
+   dwTicksTarget += dwTicksOffset;
+
+   audio_resume();
+
+   iExitCondition = EC_FRAME_COMPLETE;
+   bolDone = false;
+
+   while (!bolDone) {
+      while (SDL_PollEvent(&event)) {
+         switch (event.type) {
+            case SDL_KEYDOWN:
+               {
+                  dword cpc_key;
+                  if (event.key.keysym.mod & KMOD_SHIFT) { // PC SHIFT key held down?
+                     cpc_key = keyboard_shift[event.key.keysym.sym]; // consult the SHIFT table
+                  } else if (event.key.keysym.mod & KMOD_CTRL) { // PC CTRL key held down?
+                     cpc_key = keyboard_ctrl[event.key.keysym.sym]; // consult the CTRL table
+                  } else if (event.key.keysym.mod & KMOD_MODE) { // PC AltGr key held down?
+                     cpc_key = keyboard_mode[event.key.keysym.sym]; // consult the AltGr table
+                  } else {
+                     cpc_key = keyboard_normal[event.key.keysym.sym]; // consult the normal table
+                  }
+                  if ((!(cpc_key & MOD_EMU_KEY)) && (!CPC.paused) && ((byte)cpc_key != 0xff)) {
+                     keyboard_matrix[(byte)cpc_key >> 4] &= ~bit_values[(byte)cpc_key & 7]; // key is being held down
+                     if (cpc_key & MOD_CPC_SHIFT) { // CPC SHIFT key required?
+                        keyboard_matrix[0x25 >> 4] &= ~bit_values[0x25 & 7]; // key needs to be SHIFTed
+                     } else {
+                        keyboard_matrix[0x25 >> 4] |= bit_values[0x25 & 7]; // make sure key is unSHIFTed
+                     }
+                     if (cpc_key & MOD_CPC_CTRL) { // CPC CONTROL key required?
+                        keyboard_matrix[0x27 >> 4] &= ~bit_values[0x27 & 7]; // CONTROL key is held down
+                     } else {
+                        keyboard_matrix[0x27 >> 4] |= bit_values[0x27 & 7]; // make sure CONTROL key is released
+                     }
+                  }
+               }
+               break;
+
+            case SDL_KEYUP:
+               {
+                  dword cpc_key;
+                  if (event.key.keysym.mod & KMOD_SHIFT) { // PC SHIFT key held down?
+                     cpc_key = keyboard_shift[event.key.keysym.sym]; // consult the SHIFT table
+                  } else if (event.key.keysym.mod & KMOD_CTRL) { // PC CTRL key held down?
+                     cpc_key = keyboard_ctrl[event.key.keysym.sym]; // consult the CTRL table
+                  } else if (event.key.keysym.mod & KMOD_MODE) { // PC AltGr key held down?
+                     cpc_key = keyboard_mode[event.key.keysym.sym]; // consult the AltGr table
+                  } else {
+                     cpc_key = keyboard_normal[event.key.keysym.sym]; // consult the normal table
+                  }
+                  if (!(cpc_key & MOD_EMU_KEY)) { // a key of the CPC keyboard?
+                     if ((!CPC.paused) && ((byte)cpc_key != 0xff)) {
+                        keyboard_matrix[(byte)cpc_key >> 4] |= bit_values[(byte)cpc_key & 7]; // key has been released
+                        keyboard_matrix[0x25 >> 4] |= bit_values[0x25 & 7]; // make sure key is unSHIFTed
+                        keyboard_matrix[0x27 >> 4] |= bit_values[0x27 & 7]; // make sure CONTROL key is not held down
+                     }
+                  } else { // process emulator specific keys
+                     switch (cpc_key) {
+
+                        case CAP32_FULLSCRN:
+                           audio_pause();
+                           SDL_Delay(20);
+                           video_shutdown();
+                           CPC.scr_window = CPC.scr_window ? 0 : 1;
+                           if (video_init()) {
+                              fprintf(stderr, "video_init() failed. Aborting.\n");
+                              exit(-1);
+                           }
+                           audio_resume();
+                           break;
+
+                        case CAP32_TAPEPLAY:
+                           if (pbTapeImage) {
+                              if (CPC.tape_play_button) {
+                                 CPC.tape_play_button = 0;
+                              } else {
+                                 CPC.tape_play_button = 0x10;
+                              }
+                           }
+                           break;
+
+                        case CAP32_RESET:
+                           emulator_reset(false);
+                           break;
+
+                        case CAP32_JOY:
+                           CPC.joysticks = CPC.joysticks ? 0 : 1;
+                           input_swap_joy();
+                           break;
+
+                        case CAP32_EXIT:
+                           exit (0);
+                           break;
+
+                        case CAP32_FPS:
+                           CPC.scr_fps = CPC.scr_fps ? 0 : 1; // toggle fps display on or off
+                           break;
+
+                        case CAP32_SPEED:
+                           CPC.limit_speed = CPC.limit_speed ? 0 : 1;
+                           break;
+
+                        #ifdef DEBUG
+                        case DEBUG_KEY:
+                           dwDebugFlag = dwDebugFlag ? 0 : 1;
+                           #ifdef DEBUG_CRTC
+                           if (dwDebugFlag) {
+                              for (int n = 0; n < 14; n++) {
+                                 fprintf(pfoDebug, "%02x = %02x\r\n", n, CRTC.registers[n]);
+                              }
+                           }
+                           #endif
+                           break;
+                        #endif
+                     }
+                  }
+               }
+               break;
+
+            case SDL_QUIT:
+               exit(0);
+         }
+      }
+
+      if (!CPC.paused) { // run the emulation, as long as the user doesn't pause it
+         dwTicks = SDL_GetTicks();
+         if (dwTicks >= dwTicksTargetFPS) { // update FPS counter?
+            dwFPS = dwFrameCount;
+            dwFrameCount = 0;
+            dwTicksTargetFPS = dwTicks + 1000; // prep counter for the next run
+         }
+
+         if (CPC.limit_speed) { // limit to original CPC speed?
+            if (CPC.snd_enabled) {
+               if (iExitCondition == EC_SOUND_BUFFER) {
+                  if (!dwSndBufferCopied) { // limit speed?
+                     continue; // delay emulation
+                  }
+                  dwSndBufferCopied = 0;
+               }
+            } else if (iExitCondition == EC_CYCLE_COUNT) {
+               dwTicks = SDL_GetTicks();
+               if (dwTicks < dwTicksTarget) { // limit speed?
+                  continue; // delay emulation
+               }
+               dwTicksTarget = dwTicks + dwTicksOffset; // prep counter for the next run
+            }
+         }
+
+         if (!vid_plugin->lock()) { // lock the video buffer
+               continue; // skip the emulation if we can't get a lock
+            }
+         dwOffset = CPC.scr_pos - CPC.scr_base; // offset in current surface row
+         if (VDU.scrln > 0) {
+            CPC.scr_base = (dword *)back_surface->pixels + (VDU.scrln * CPC.scr_line_offs); // determine current position
+         } else {
+            CPC.scr_base = (dword *)back_surface->pixels; // reset to surface start
+         }
+         CPC.scr_pos = CPC.scr_base + dwOffset; // update current rendering position
+
+         iExitCondition = z80_execute(); // run the emulation until an exit condition is met
+
+         if (iExitCondition == EC_FRAME_COMPLETE) { // emulation finished rendering a complete frame?
+            dwFrameCount++;
+            if (CPC.scr_fps) {
+               char chStr[15];
+               sprintf(chStr, "%3dFPS %3d%%", (int)dwFPS, (int)dwFPS * 100 / 50);
+               print((dword *)back_surface->pixels + CPC.scr_line_offs, chStr, true); // display the frames per second counter
+            }
+            vid_plugin->unlock();
+            video_display(); // update PC display
+         } else {
+            vid_plugin->unlock();
+         }
+      }
+   }
+
+   exit(0);
+}
