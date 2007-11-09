@@ -26,6 +26,8 @@ extern t_drive driveA;
 extern t_drive driveB;
 extern t_VDU VDU;
 extern byte *pbSndBuffer;
+extern byte bit_values[8];
+extern byte keyboard_matrix[16];
 
 #define MAX_DISK_FORMAT     2
 #define DEF_SPEED_SETTING   4
@@ -47,11 +49,14 @@ static int ClearScreen;
 /* Defined elsewhere */
 int  video_init();
 int  audio_init();
-int  emulator_init();
 void audio_shutdown();
 int  dsk_load(char *pchFileName, t_drive *drive, char chID);
 void dsk_eject(t_drive *drive);
-int snapshot_load (char *pchFileName);
+int  snapshot_load (char *pchFileName);
+
+int  emulator_init();
+void emulator_reset (bool bolMF2Reset);
+
 
 static void RenderVideo();
 static void AudioCallback(void* buf, unsigned int *length, void *userdata);
@@ -143,6 +148,34 @@ fclose(foo);
   return 1;
 }
 
+/* Process input */
+int ParseInput()
+{
+  static SceCtrlData pad;
+
+  if (!pspCtrlPollControls(&pad))
+    return 0;
+
+  keyboard_matrix[0x57 >> 4] |= bit_values[0x57 & 7]; // space
+  keyboard_matrix[0x02 >> 4] |= bit_values[0x02 & 7]; // down 
+  keyboard_matrix[0x10 >> 4] |= bit_values[0x10 & 7]; // left
+  keyboard_matrix[0x01 >> 4] |= bit_values[0x01 & 7]; // right
+  keyboard_matrix[0x00 >> 4] |= bit_values[0x00 & 7]; // up
+
+  if (pad.Buttons & PSP_CTRL_CIRCLE)
+    keyboard_matrix[0x57 >> 4] &= ~bit_values[0x57 & 7];
+  if (pad.Buttons & PSP_CTRL_DOWN)
+    keyboard_matrix[0x02 >> 4] &= ~bit_values[0x02 & 7];
+  if (pad.Buttons & PSP_CTRL_LEFT)
+    keyboard_matrix[0x10 >> 4] &= ~bit_values[0x10 & 7];
+  if (pad.Buttons & PSP_CTRL_RIGHT)
+    keyboard_matrix[0x01 >> 4] &= ~bit_values[0x01 & 7];
+  if (pad.Buttons & PSP_CTRL_UP)
+    keyboard_matrix[0x00 >> 4] &= ~bit_values[0x00 & 7];
+
+  return 0;
+}
+
 /* Run emulation */
 void RunEmulation()
 {
@@ -181,11 +214,17 @@ void RunEmulation()
 /*TODO */
 snapshot_load("sorcery.sna");
 
+  /* Clear keyboard matrix */
+  memset(keyboard_matrix, 0xff, sizeof(keyboard_matrix));
+
   /* Resume sound */
   pspAudioSetChannelCallback(0, AudioCallback, 0);
 
   while (!ExitPSP)
   {
+    /* Process key events */
+    if (ParseInput()) break;
+
     if (CPC.limit_speed)
     {
       if (CPC.snd_enabled)
@@ -215,6 +254,13 @@ snapshot_load("sorcery.sna");
 void TrashEmulation()
 {
   if (Screen) pspImageDestroy(Screen);
+
+  printer_stop();
+  emulator_shutdown();
+
+  dsk_eject(&driveA);
+  dsk_eject(&driveB);
+  tape_eject();
 
   audio_shutdown();
 }
