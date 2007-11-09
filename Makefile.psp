@@ -12,7 +12,7 @@ EXTRA_TARGETS=EBOOT.PBP
 PSP_EBOOT_TITLE=$(PSP_APP_NAME) $(PSP_APP_VER)
 #PSP_EBOOT_ICON=$(DATA)/arnold-icon.png
 
-BUILD_APP=z80.o crtc.o fdc.o tape.o psg.o psp/cap32.o
+BUILD_APP=z80.o crtc.o fdc.o tape.o psg.o cap32.o psp/cap32_psp.o
 BUILD_PSPAPP=$(PSPAPP)/main.o $(PSPAPP)/emulate.o $(PSPAPP)/menu.o
 
 OBJS=$(BUILD_APP) $(BUILD_PSPAPP)

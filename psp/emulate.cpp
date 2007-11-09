@@ -29,14 +29,13 @@ extern byte *pbSndBuffer;
 extern byte bit_values[8];
 extern byte keyboard_matrix[16];
 
+int video_init();
+int audio_init();
+void audio_shutdown();
+
 #define MAX_DISK_FORMAT     2
 #define DEF_SPEED_SETTING   4
 #define DEFAULT_DISK_FORMAT 0
-
-t_disk_format disk_format[MAX_DISK_FORMAT] = {
-   { "178K Data Format", 40, 1, 9, 2, 0x52, 0xe5, {{ 0xc1, 0xc6, 0xc2, 0xc7, 0xc3, 0xc8, 0xc4, 0xc9, 0xc5 }} },
-   { "169K Vendor Format", 40, 1, 9, 2, 0x52, 0xe5, {{ 0x41, 0x46, 0x42, 0x47, 0x43, 0x48, 0x44, 0x49, 0x45 }} }
-};
 
 dword freq_table[] = { 44100, 44100, 44100, 44100, 44100 };
 
@@ -45,18 +44,6 @@ PspImage *Screen = NULL;
 static PspFpsCounter FpsCounter;
 static int ScreenX, ScreenY, ScreenW, ScreenH;
 static int ClearScreen;
-
-/* Defined elsewhere */
-int  video_init();
-int  audio_init();
-void audio_shutdown();
-int  dsk_load(char *pchFileName, t_drive *drive, char chID);
-void dsk_eject(t_drive *drive);
-int  snapshot_load (char *pchFileName);
-
-int  emulator_init();
-void emulator_reset (bool bolMF2Reset);
-
 
 static void RenderVideo();
 static void AudioCallback(void* buf, unsigned int *length, void *userdata);
@@ -85,7 +72,6 @@ fclose(foo);
   CPC.model = 2; // CPC 6128
   CPC.jumpers = 0x1e; // OEM is Amstrad, video refresh is 50Hz
   CPC.ram_size = 128 & 0x02c0; // 128KB RAM
-  CPC.speed = DEF_SPEED_SETTING; // original CPC speed
   CPC.limit_speed = 1;
   CPC.auto_pause = 1;
   CPC.printer = 0;
