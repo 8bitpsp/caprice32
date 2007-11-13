@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <zlib.h>
 
 #include "cap32.h"
 #include "cap32_psp.h"
@@ -1948,8 +1949,178 @@ void emulator_reset (bool bolMF2Reset)
    }
 }
 
+int snapshot_save_open(void *pfileObject)
+{
+   t_SNA_header sh;
+   int n;
+   dword dwFlags;
 
-int snapshot_load (char *pchFileName)
+   memset(&sh, 0, sizeof(sh));
+   strcpy(sh.id, "MV - SNA");
+   sh.version = 3;
+// Z80
+   sh.AF[1] = _A;
+   sh.AF[0] = _F;
+   sh.BC[1] = _B;
+   sh.BC[0] = _C;
+   sh.DE[1] = _D;
+   sh.DE[0] = _E;
+   sh.HL[1] = _H;
+   sh.HL[0] = _L;
+   sh.R = (_R & 0x7f) | (_Rb7 & 0x80);
+   sh.I = _I;
+   if (_IFF1)
+      sh.IFF0 = 1;
+   if (_IFF2)
+      sh.IFF1 = 1;
+   sh.IX[1] = _IXh;
+   sh.IX[0] = _IXl;
+   sh.IY[1] = _IYh;
+   sh.IY[0] = _IYl;
+   sh.SP[1] = z80.SP.b.h;
+   sh.SP[0] = z80.SP.b.l;
+   sh.PC[1] = z80.PC.b.h;
+   sh.PC[0] = z80.PC.b.l;
+   sh.IM = _IM;
+   sh.AFx[1] = z80.AFx.b.h;
+   sh.AFx[0] = z80.AFx.b.l;
+   sh.BCx[1] = z80.BCx.b.h;
+   sh.BCx[0] = z80.BCx.b.l;
+   sh.DEx[1] = z80.DEx.b.h;
+   sh.DEx[0] = z80.DEx.b.l;
+   sh.HLx[1] = z80.HLx.b.h;
+   sh.HLx[0] = z80.HLx.b.l;
+// Gate Array
+   sh.ga_pen = GateArray.pen;
+   for (n = 0; n < 17; n++) { // loop for all colours + border
+      sh.ga_ink_values[n] = GateArray.ink_values[n];
+   }
+   sh.ga_ROM_config = GateArray.ROM_config;
+   sh.ga_RAM_config = GateArray.RAM_config;
+// CRTC
+   sh.crtc_reg_select = CRTC.reg_select;
+   for (n = 0; n < 18; n++) { // loop for all CRTC registers
+      sh.crtc_registers[n] = CRTC.registers[n];
+   }
+// ROM select
+   sh.upper_ROM = GateArray.upper_ROM;
+// PPI
+   sh.ppi_A = PPI.portA;
+   sh.ppi_B = PPI.portB;
+   sh.ppi_C = PPI.portC;
+   sh.ppi_control = PPI.control;
+// PSG
+   sh.psg_reg_select = PSG.reg_select;
+   for (n = 0; n < 16; n++) { // loop for all PSG registers
+      sh.psg_registers[n] = PSG.RegisterAY.Index[n];
+   }
+
+   sh.ram_size[0] = CPC.ram_size & 0xff;
+   sh.ram_size[1] = (CPC.ram_size >> 8) & 0xff;
+// version 2 info
+   sh.cpc_model = CPC.model;
+// version 3 info
+   sh.fdc_motor = FDC.motor;
+   sh.drvA_current_track = driveA.current_track;
+   sh.drvB_current_track = driveB.current_track;
+   sh.printer_data = CPC.printer_port ^ 0x80; // invert bit 7 again
+   sh.psg_env_step = PSG.AmplitudeEnv >> 1; // divide by 2 to bring it into the 0 - 15 range
+   if (PSG.FirstPeriod) {
+      switch (PSG.RegisterAY.EnvType)
+      {
+         case 0:
+         case 1:
+         case 2:
+         case 3:
+         case 8:
+         case 9:
+         case 10:
+         case 11:
+            sh.psg_env_direction = 0xff; // down
+            break;
+         case 4:
+         case 5:
+         case 6:
+         case 7:
+         case 12:
+         case 13:
+         case 14:
+         case 15:
+            sh.psg_env_direction = 0x01; // up
+            break;
+      }
+   } else {
+      switch (PSG.RegisterAY.EnvType)
+      {
+         case 0:
+         case 1:
+         case 2:
+         case 3:
+         case 4:
+         case 5:
+         case 6:
+         case 7:
+         case 9:
+         case 11:
+         case 13:
+         case 15:
+            sh.psg_env_direction = 0x00; // hold
+            break;
+         case 8:
+         case 14:
+            sh.psg_env_direction = 0xff; // down
+            break;
+         case 10:
+         case 12:
+            sh.psg_env_direction = 0x01; // up
+            break;
+      }
+   }
+   sh.crtc_addr[0] = CRTC.addr & 0xff;
+   sh.crtc_addr[1] = (CRTC.addr >> 8) & 0xff;
+   sh.crtc_scanline[0] = VDU.scanline & 0xff;
+   sh.crtc_scanline[1] = (VDU.scanline >> 8) & 0xff;
+   sh.crtc_char_count[0] = CRTC.char_count;
+   sh.crtc_line_count = CRTC.line_count;
+   sh.crtc_raster_count = CRTC.raster_count;
+   sh.crtc_hsw_count = CRTC.hsw_count;
+   sh.crtc_vsw_count = CRTC.vsw_count;
+   dwFlags = 0;
+   if (CRTC.flag_invsync) { // vsync active?
+      dwFlags |= 1;
+   }
+   if (flags1.inHSYNC) { // hsync active?
+      dwFlags |= 2;
+   }
+   if (CRTC.flag_invta) { // in vertical total adjust?
+      dwFlags |= 0x80;
+   }
+   sh.crtc_flags[0] = dwFlags & 0xff;
+   sh.crtc_flags[1] = (dwFlags >> 8) & 0xff;
+   sh.ga_int_delay = GateArray.hs_count;
+   sh.ga_sl_count = GateArray.sl_count;
+   sh.z80_int_pending = z80.int_pending;
+
+   if (pfileObject) { // = fopen(pchFileName, "wb")) != NULL) {
+      if (gzwrite(pfileObject, &sh, sizeof(sh)) != sizeof(sh)) { // write snapshot header
+         return ERR_SNA_WRITE;
+      }
+      if (gzwrite(pfileObject, pbRAM, CPC.ram_size*1024) != CPC.ram_size*1024) { // write memory contents to snapshot file
+         return ERR_SNA_WRITE;
+      }
+   } else {
+      return ERR_SNA_WRITE;
+   }
+
+/* char *pchTmpBuffer = new char[MAX_LINE_LEN];
+   LoadString(hAppInstance, MSG_SNA_SAVE, chMsgBuffer, sizeof(chMsgBuffer));
+   snprintf(pchTmpBuffer, _MAX_PATH-1, chMsgBuffer, CPC.snap_file);
+   add_message(pchTmpBuffer);
+   delete [] pchTmpBuffer; */
+   return 0;
+}
+
+int snapshot_load_open(void *pfileObject)
 {
   int n;
   dword dwSnapSize, dwModel, dwFlags;
@@ -1959,16 +2130,16 @@ int snapshot_load (char *pchFileName)
   t_SNA_header sh;
 
   memset(&sh, 0, sizeof(sh));
-  if ((pfileObject = fopen(pchFileName, "rb")) != NULL) {
-    fread(&sh, sizeof(sh), 1, pfileObject); // read snapshot header
+  if (pfileObject) { //(pfileObject = fopen(pchFileName, "rb")) != NULL) {
+    gzread(pfileObject, &sh, sizeof(sh)); // read snapshot header
     if (memcmp(sh.id, "MV - SNA", 8) != 0) { // valid SNApshot image?
-      fclose(pfileObject);
+      // fclose(pfileObject);
       return ERR_SNA_INVALID;
     }
     dwSnapSize = sh.ram_size[0] + (sh.ram_size[1] * 256); // memory dump size
     dwSnapSize &= ~0x3f; // limit to multiples of 64
     if (!dwSnapSize) {
-      fclose(pfileObject);
+      // fclose(pfileObject);
       return ERR_SNA_SIZE;
     }
     if (dwSnapSize > CPC.ram_size) { // memory dump size differs from current RAM size?
@@ -1980,13 +2151,13 @@ int snapshot_load (char *pchFileName)
         CPC.ram_size = dwSnapSize;
         pbRAM = pbTemp;
       } else {
-        fclose(pfileObject);
+        // fclose(pfileObject);
         return ERR_OUT_OF_MEMORY;
       }
     }
     emulator_reset(false);
-    n = fread(pbRAM, dwSnapSize*1024, 1, pfileObject); // read memory dump into CPC RAM
-    fclose(pfileObject);
+    n = gzread(pfileObject, pbRAM, dwSnapSize*1024); // read memory dump into CPC RAM
+    // fclose(pfileObject);
     if (!n) {
       emulator_reset(false);
       return ERR_SNA_INVALID;
@@ -2079,8 +2250,8 @@ int snapshot_load (char *pchFileName)
         strcat(chPath, "/");
         strncat(chPath, chROMFile[dwModel], sizeof(chPath)-1 - strlen(chPath)); // path to the required ROM image
         if ((pfileObject = fopen(chPath, "rb")) != NULL) {
-          n = fread(pbROMlo, 2*16384, 1, pfileObject);
-          fclose(pfileObject);
+          n = gzread(pfileObject, pbROMlo, 2*16384);
+          // fclose(pfileObject);
           if (!n) {
             emulator_reset(false);
             return ERR_CPC_ROM_MISSING;

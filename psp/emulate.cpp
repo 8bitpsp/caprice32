@@ -19,14 +19,41 @@
 #include "emulate.h"
 #include "cap32_psp.h"
 
+#define UNSET_KEY(code) \
+  keyboard_matrix[cpc_kbd[CPC.keyboard][(code)]>>4]|=bit_values[cpc_kbd[CPC.keyboard][(code)]&7]
+#define SET_KEY(code) \
+  keyboard_matrix[cpc_kbd[CPC.keyboard][(code)]>>4]&=~bit_values[cpc_kbd[CPC.keyboard][(code)]&7]
+
 dword freq_table[] = { 44100 };
 
+extern EmulatorOptions Options;
+
 PspImage *Screen = NULL;
+struct GameConfig ActiveGameConfig;
+
+/* Button masks */
+static const u64 ButtonMask[] = 
+{
+  PSP_CTRL_LTRIGGER | PSP_CTRL_RTRIGGER, 
+  PSP_CTRL_START    | PSP_CTRL_SELECT,
+  PSP_CTRL_ANALUP,    PSP_CTRL_ANALDOWN,
+  PSP_CTRL_ANALLEFT,  PSP_CTRL_ANALRIGHT,
+  PSP_CTRL_UP,        PSP_CTRL_DOWN,
+  PSP_CTRL_LEFT,      PSP_CTRL_RIGHT,
+  PSP_CTRL_SQUARE,    PSP_CTRL_CROSS,
+  PSP_CTRL_CIRCLE,    PSP_CTRL_TRIANGLE,
+  PSP_CTRL_LTRIGGER,  PSP_CTRL_RTRIGGER,
+  PSP_CTRL_SELECT,    PSP_CTRL_START,
+  0 /* End */
+};
 
 static PspFpsCounter FpsCounter;
 static int ScreenX, ScreenY, ScreenW, ScreenH;
 static int ClearScreen;
+static u32 TicksPerUpdate, TicksPerSecond;
+static u64 LastTick;
 
+static int ParseInput();
 static void RenderVideo();
 static void AudioCallback(void* buf, unsigned int *length, void *userdata);
 
@@ -35,7 +62,6 @@ FILE*foo; /* TODO */
 /* Initialize emulation */
 int InitEmulation()
 {
-  /* TODO: try 256 if this works */
   if (!(Screen = pspImageCreateVram(512, CPC_VISIBLE_SCR_HEIGHT, 
     PSP_IMAGE_16BPP))) 
       return 0;
@@ -60,7 +86,7 @@ fclose(foo);
   CPC.printer = 0;
   CPC.mf2 = 0;
   CPC.keyboard = 0;
-  CPC.joysticks = 0;
+  CPC.joysticks = 1;
 
   CPC.scr_vsync = 0;
   CPC.scr_led = 1;
@@ -103,8 +129,6 @@ fclose(foo);
 
   for (i = 0; i < 16; i++) strcpy(CPC.rom_file[i], "");
 
-//  strcpy(CPC.rom_file[0], "sorcery.sna");
-
   z80_init_tables(); // init Z80 emulation
 
   /* Clear keyboard matrix */
@@ -125,25 +149,42 @@ int ParseInput()
 {
   static SceCtrlData pad;
 
-  if (!pspCtrlPollControls(&pad))
-    return 0;
+  /* Check the input */
+  if (pspCtrlPollControls(&pad))
+  {
+#ifdef PSP_DEBUG
+    if ((pad.Buttons & (PSP_CTRL_SELECT | PSP_CTRL_START))
+      == (PSP_CTRL_SELECT | PSP_CTRL_START))
+        pspUtilSaveVramSeq(ScreenshotPath, pspFileGetFilename(GameName));
+#endif
 
-  keyboard_matrix[0x57 >> 4] |= bit_values[0x57 & 7]; // space
-  keyboard_matrix[0x02 >> 4] |= bit_values[0x02 & 7]; // down 
-  keyboard_matrix[0x10 >> 4] |= bit_values[0x10 & 7]; // left
-  keyboard_matrix[0x01 >> 4] |= bit_values[0x01 & 7]; // right
-  keyboard_matrix[0x00 >> 4] |= bit_values[0x00 & 7]; // up
+    /* Parse input */
+    int i, on, code;
+    for (i = 0; ButtonMapId[i] >= 0; i++)
+    {
+      code = ActiveGameConfig.ButtonMap[ButtonMapId[i]];
+      on = (pad.Buttons & ButtonMask[i]) == ButtonMask[i];
 
-  if (pad.Buttons & PSP_CTRL_CIRCLE)
-    keyboard_matrix[0x57 >> 4] &= ~bit_values[0x57 & 7];
-  if (pad.Buttons & PSP_CTRL_DOWN)
-    keyboard_matrix[0x02 >> 4] &= ~bit_values[0x02 & 7];
-  if (pad.Buttons & PSP_CTRL_LEFT)
-    keyboard_matrix[0x10 >> 4] &= ~bit_values[0x10 & 7];
-  if (pad.Buttons & PSP_CTRL_RIGHT)
-    keyboard_matrix[0x01 >> 4] &= ~bit_values[0x01 & 7];
-  if (pad.Buttons & PSP_CTRL_UP)
-    keyboard_matrix[0x00 >> 4] &= ~bit_values[0x00 & 7];
+      /* Check to see if a button set is pressed. If so, unset it, so it */
+      /* doesn't trigger any other combination presses. */
+      if (on) pad.Buttons |= ButtonMask[i];
+
+      if (code & KBD)
+      {
+        if (on) SET_KEY(CODE_MASK(code));
+        else  UNSET_KEY(CODE_MASK(code));
+      }
+      else if (code & SPC)
+      {
+        switch (CODE_MASK(code))
+        {
+        case SPC_MENU:
+          if (on) return 1;
+          break;
+        }
+      }
+    }
+  }
 
   return 0;
 }
@@ -154,7 +195,7 @@ void RunEmulation()
   float ratio;
 
   /* Recompute screen size/position */
-  switch (DISPLAY_MODE_UNSCALED) //Options.DisplayMode)
+  switch (Options.DisplayMode)
   {
   default:
   case DISPLAY_MODE_UNSCALED:
@@ -175,22 +216,29 @@ void RunEmulation()
   ScreenX = (SCR_WIDTH / 2) - (ScreenW / 2);
   ScreenY = (SCR_HEIGHT / 2) - (ScreenH / 2);
 
+  /* Recompute update frequency */
+  TicksPerSecond = sceRtcGetTickResolution();
+  if (Options.LimitSpeed)
+  {
+    TicksPerUpdate = TicksPerSecond
+      / (Options.LimitSpeed / (Options.Frameskip + 1));
+    sceRtcGetCurrentTick(&LastTick);
+  }
+
   ClearScreen = 1;
 
   /* Init performance counter */
   pspPerfInitFps(&FpsCounter);
-
-  int z80_exit = EC_FRAME_COMPLETE;
-  dword dwOffset;
-
-/*TODO */
-snapshot_load("sorcery.sna");
 
   /* Clear keyboard matrix */
   memset(keyboard_matrix, 0xff, sizeof(keyboard_matrix));
 
   /* Resume sound */
   pspAudioSetChannelCallback(0, AudioCallback, 0);
+
+  static int z80_exit = EC_FRAME_COMPLETE;
+  dword dwOffset;
+  u64 current_tick;
 
   while (!ExitPSP)
   {
@@ -199,11 +247,15 @@ snapshot_load("sorcery.sna");
 
     if (CPC.limit_speed)
     {
-      if (CPC.snd_enabled)
+      if (z80_exit == EC_CYCLE_COUNT)
       {
-      }
-      else if (z80_exit == EC_CYCLE_COUNT)
-      {
+        /* Wait if needed */
+        if (Options.LimitSpeed)
+        {
+          do { sceRtcGetCurrentTick(&current_tick); }
+          while (current_tick - LastTick < TicksPerUpdate);
+          LastTick = current_tick;
+        }
       }
     }
 
@@ -249,34 +301,11 @@ void RenderVideo()
     pspVideoClearScreen();
   }
 
-/*
-  if (Screen->Depth == PSP_IMAGE_INDEXED && bitmap.pal.update)
-  {
-    unsigned char r, g, b;
-    unsigned short c, i;
-
-    for(i = 0; i < PALETTE_SIZE; i++)
-    {
-      if (bitmap.pal.dirty[i])
-      {
-        r = bitmap.pal.color[i][0];
-        g = bitmap.pal.color[i][1];
-        b = bitmap.pal.color[i][2];
-        c = MAKE_PIXEL(r,g,b);
-
-        Screen->Palette[i] = c;
-        Screen->Palette[i|0x20] = c;
-        Screen->Palette[i|0x40] = c;
-        Screen->Palette[i|0x60] = c;
-      }
-    }
-  }
-*/
   /* Draw the screen */
   pspVideoPutImage(Screen, ScreenX, ScreenY, ScreenW, ScreenH);
 
   /* Show FPS counter */
-  if (1)
+  if (Options.ShowFps)
   {
     static char fps_display[32];
     sprintf(fps_display, " %3.02f", pspPerfGetFps(&FpsCounter));
@@ -291,7 +320,7 @@ void RenderVideo()
   pspVideoEnd();
 
   /* Wait for VSync signal */
-//  if (Options.VSync) pspVideoWaitVSync();
+  if (Options.VSync) pspVideoWaitVSync();
 
   /* Swap buffers */
   pspVideoSwapBuffers();

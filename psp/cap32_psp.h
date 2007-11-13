@@ -168,18 +168,19 @@ extern byte bit_values[8];
 extern byte keyboard_matrix[16];
 extern dword cpc_kbd[3][149];
 
-int video_init();
-int audio_init();
+int  video_init();
+int  audio_init();
 void audio_shutdown();
 
 #define MAX_DISK_FORMAT     2
 #define DEF_SPEED_SETTING   4
 #define DEFAULT_DISK_FORMAT 0
 
-int emulator_init();
+int  emulator_init();
 void emulator_shutdown(void);
 
-int  snapshot_load(char *pchFileName);
+int snapshot_load_open(void *pfileObject);
+int snapshot_save_open(void *pfileObject);
 
 int  printer_start(void);
 void printer_stop(void);
