@@ -14,15 +14,14 @@
 #include "image.h"
 #include "util.h"
 #include "file.h"
+#include "kybd.h"
 
 #include "menu.h"
 #include "emulate.h"
 #include "cap32_psp.h"
 
-#define UNSET_KEY(code) \
-  keyboard_matrix[cpc_kbd[CPC.keyboard][(code)]>>4]|=bit_values[cpc_kbd[CPC.keyboard][(code)]&7]
-#define SET_KEY(code) \
-  keyboard_matrix[cpc_kbd[CPC.keyboard][(code)]>>4]&=~bit_values[cpc_kbd[CPC.keyboard][(code)]&7]
+#define UNSET_KEY(code) keyboard_matrix[(code)>>4]|=bit_values[(code)&7]
+#define SET_KEY(code)   keyboard_matrix[(code)>>4]&=~bit_values[(code)&7]
 
 dword freq_table[] = { 44100 };
 
@@ -49,13 +48,16 @@ static const u64 ButtonMask[] =
 
 static PspFpsCounter FpsCounter;
 static int ScreenX, ScreenY, ScreenW, ScreenH;
-static int ClearScreen;
+static int ClearScreen, ShowKybd;
 static u32 TicksPerUpdate, TicksPerSecond;
 static u64 LastTick;
 
-static int ParseInput();
+static int  ParseInput();
+static void HandleKeyInput(unsigned int code, int on);
 static void RenderVideo();
 static void AudioCallback(void* buf, unsigned int *length, void *userdata);
+
+static PspKeyboardLayout *Cpc464Kybd;
 
 FILE*foo; /* TODO */
 
@@ -68,6 +70,8 @@ int InitEmulation()
 
   Screen->Viewport.Width = CPC_VISIBLE_SCR_WIDTH;
   Screen->Viewport.Height = CPC_VISIBLE_SCR_HEIGHT;
+
+  Cpc464Kybd = pspKybdLoadLayout("cpc464.lyt", NULL, HandleKeyInput);
 
 /* TODO */
 foo=fopen("log.txt","w");
@@ -145,7 +149,7 @@ fclose(foo);
 }
 
 /* Process input */
-int ParseInput()
+static int ParseInput()
 {
   static SceCtrlData pad;
 
@@ -158,6 +162,9 @@ int ParseInput()
         pspUtilSaveVramSeq(ScreenshotPath, pspFileGetFilename(GameName));
 #endif
 
+    /* Navigate the virtual keyboard, if shown */
+    if (ShowKybd) pspKybdNavigate(Cpc464Kybd, &pad);
+
     /* Parse input */
     int i, on, code;
     for (i = 0; ButtonMapId[i] >= 0; i++)
@@ -169,10 +176,10 @@ int ParseInput()
       /* doesn't trigger any other combination presses. */
       if (on) pad.Buttons |= ButtonMask[i];
 
-      if (code & KBD)
+      if ((code & KBD) && !ShowKybd)
       {
-        if (on) SET_KEY(CODE_MASK(code));
-        else  UNSET_KEY(CODE_MASK(code));
+        if (on) SET_KEY(cpc_kbd[CPC.keyboard][CODE_MASK(code)]);
+        else  UNSET_KEY(cpc_kbd[CPC.keyboard][CODE_MASK(code)]);
       }
       else if (code & SPC)
       {
@@ -181,12 +188,26 @@ int ParseInput()
         case SPC_MENU:
           if (on) return 1;
           break;
+        case SPC_SHOW_KEYS:
+          if (ShowKybd != on && Cpc464Kybd)
+          {
+            if (on) pspKybdReinit(Cpc464Kybd);
+            else { pspKybdReleaseAll(Cpc464Kybd); ClearScreen = 1; }
+          }
+          ShowKybd = on;
+          break;
         }
       }
     }
   }
 
   return 0;
+}
+
+static void HandleKeyInput(unsigned int code, int on)
+{
+  if (on) SET_KEY(code);
+  else  UNSET_KEY(code);
 }
 
 /* Run emulation */
@@ -225,6 +246,7 @@ void RunEmulation()
     sceRtcGetCurrentTick(&LastTick);
   }
 
+  ShowKybd = 0;
   ClearScreen = 1;
 
   /* Init performance counter */
@@ -277,7 +299,11 @@ void RunEmulation()
 /* Release emulation resources */
 void TrashEmulation()
 {
+  /* Destroy canvas */
   if (Screen) pspImageDestroy(Screen);
+
+  /* Destroy keyboard layout */
+  if (Cpc464Kybd) pspKybdDestroyLayout(Cpc464Kybd);
 
   printer_stop();
   emulator_shutdown();
@@ -289,7 +315,7 @@ void TrashEmulation()
   audio_shutdown();
 }
 
-void RenderVideo()
+static void RenderVideo()
 {
   /* Update the display */
   pspVideoBegin();
@@ -303,6 +329,9 @@ void RenderVideo()
 
   /* Draw the screen */
   pspVideoPutImage(Screen, ScreenX, ScreenY, ScreenW, ScreenH);
+
+  /* Draw keyboard */
+  if (ShowKybd) pspKybdRender(Cpc464Kybd);
 
   /* Show FPS counter */
   if (Options.ShowFps)
@@ -326,7 +355,7 @@ void RenderVideo()
   pspVideoSwapBuffers();
 }
 
-void AudioCallback(void* buf, unsigned int *length, void *userdata)
+static void AudioCallback(void* buf, unsigned int *length, void *userdata)
 {
   memcpy(buf, pbSndBuffer, CPC.snd_buffersize);
 }

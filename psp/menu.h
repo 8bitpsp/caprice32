@@ -15,6 +15,7 @@ void TrashMenu();
 #define CODE_MASK(x) (x & 0xff)
 
 #define SPC_MENU                   1
+#define SPC_SHOW_KEYS              2
 
 #define CONTROL_ANALOG_UP          0x00
 #define CONTROL_ANALOG_DOWN        0x01

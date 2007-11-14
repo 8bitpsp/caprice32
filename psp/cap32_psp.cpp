@@ -2249,9 +2249,10 @@ int snapshot_load_open(void *pfileObject)
         strncpy(chPath, CPC.rom_path, sizeof(chPath)-2);
         strcat(chPath, "/");
         strncat(chPath, chROMFile[dwModel], sizeof(chPath)-1 - strlen(chPath)); // path to the required ROM image
-        if ((pfileObject = fopen(chPath, "rb")) != NULL) {
-          n = gzread(pfileObject, pbROMlo, 2*16384);
-          // fclose(pfileObject);
+        FILE *file;
+        if ((file = fopen(chPath, "rb")) != NULL) {
+          n = fread(pbROMlo, 2*16384, 1, file);
+          fclose(file);
           if (!n) {
             emulator_reset(false);
             return ERR_CPC_ROM_MISSING;

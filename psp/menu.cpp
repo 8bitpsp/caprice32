@@ -63,7 +63,7 @@ struct GameConfig DefaultConfig =
     KBD|CPC_SPACE,    /* Circle       */
     0,                /* Triangle     */
     0,                /* L Trigger    */
-    0,                /* R Trigger    */
+    SPC|SPC_SHOW_KEYS,/* R Trigger    */
     0,                /* Select       */
     0,                /* Start        */
     SPC|SPC_MENU,     /* L+R Triggers */
