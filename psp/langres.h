@@ -83,6 +83,7 @@
 
 #define RES_S_NONE              "None"
 #define RES_S_SPECIAL_OPEN_MENU "Special: Open menu"
+#define RES_S_SPECIAL_SHOW_KEYS "Special: Virtual keyboard"
 
 #define RES_S_APP_NAME \
   PSP_APP_NAME" version "PSP_APP_VER" ("__DATE__")"

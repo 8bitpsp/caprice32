@@ -51,6 +51,7 @@ static int ScreenX, ScreenY, ScreenW, ScreenH;
 static int ClearScreen, ShowKybd;
 static u32 TicksPerUpdate, TicksPerSecond;
 static u64 LastTick;
+static int Frame;
 
 static int  ParseInput();
 static void HandleKeyInput(unsigned int code, int on);
@@ -110,28 +111,17 @@ fclose(foo);
   CPC.kbd_layout = 0;
 
   CPC.max_tracksize = 6144-154;
-  CPC.snap_zip = 0;
-  CPC.drvA_zip = 0;
+
   CPC.drvA_format = DEFAULT_DISK_FORMAT;
-  CPC.drvB_zip = 0;
   CPC.drvB_format = DEFAULT_DISK_FORMAT;
 
-  strcpy(CPC.snap_file, "");
-  strcpy(CPC.tape_file, "");
-
-  strcpy(CPC.snap_path, "/snap");
-  strcpy(CPC.drvB_path, "/disk");
-  strcpy(CPC.tape_path, "/tape");
-  strcpy(CPC.drvA_path, "/disk");
-
-  CPC.tape_zip = 0;
-
   strcpy(CPC.printer_file, "/printer.dat");
-  strcpy(CPC.sdump_file, "/screen.png");
   strcpy(CPC.rom_path, ".");
-  strcpy(CPC.rom_mf2, "");
 
   for (i = 0; i < 16; i++) strcpy(CPC.rom_file[i], "");
+
+  /* insert AMSDOS in slot 7 */
+  strcpy(CPC.rom_file[7], "amsdos.rom"); 
 
   z80_init_tables(); // init Z80 emulation
 
@@ -246,6 +236,7 @@ void RunEmulation()
     sceRtcGetCurrentTick(&LastTick);
   }
 
+  Frame = 0;
   ShowKybd = 0;
   ClearScreen = 1;
 
@@ -317,6 +308,10 @@ void TrashEmulation()
 
 static void RenderVideo()
 {
+  /* Frame skipping */
+  if (++Frame <= Options.Frameskip) return;
+  else Frame = 0;
+
   /* Update the display */
   pspVideoBegin();
 

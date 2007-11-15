@@ -18,7 +18,6 @@
 #include "init.h"
 #include "file.h"
 
-/*
 #define TAB_QUICKLOAD 0
 #define TAB_STATE     1
 #define TAB_CONTROL   2
@@ -26,22 +25,18 @@
 #define TAB_SYSTEM    4
 #define TAB_ABOUT     5
 #define TAB_MAX       TAB_SYSTEM
-*/
-#define TAB_QUICKLOAD 0
-#define TAB_STATE     1
-#define TAB_CONTROL   2
-#define TAB_OPTION    3
-#define TAB_ABOUT     4
-#define TAB_MAX       TAB_OPTION
 
-#define OPTION_DISPLAY_MODE 1
-#define OPTION_FRAMESKIP    2
-#define OPTION_VSYNC        3
-#define OPTION_CLOCK_FREQ   4
-#define OPTION_SHOW_FPS     5
-#define OPTION_CONTROL_MODE 6
-#define OPTION_FRAME_LIMIT  7
-#define OPTION_ANIMATE      8
+#define SYSTEM_SCRNSHOT     0x11
+#define SYSTEM_RESET        0x12
+
+#define OPTION_DISPLAY_MODE 0x21
+#define OPTION_FRAMESKIP    0x22
+#define OPTION_VSYNC        0x23
+#define OPTION_CLOCK_FREQ   0x24
+#define OPTION_SHOW_FPS     0x25
+#define OPTION_CONTROL_MODE 0x26
+#define OPTION_FRAME_LIMIT  0x27
+#define OPTION_ANIMATE      0x28
 
 extern struct GameConfig ActiveGameConfig;
 extern PspImage *Screen;
@@ -128,6 +123,7 @@ static const PspMenuOptionDef
     MENU_OPTION(RES_S_NONE, 0),
     /* Special */
     MENU_OPTION(RES_S_SPECIAL_OPEN_MENU, SPC|SPC_MENU),
+    MENU_OPTION(RES_S_SPECIAL_SHOW_KEYS, SPC|SPC_SHOW_KEYS),
     /* Joystick */
     MENU_OPTION(RES_S_JOY1_UP,   KBD|CPC_J0_UP), 
     MENU_OPTION(RES_S_JOY1_DOWN, KBD|CPC_J0_DOWN), 
@@ -226,25 +222,18 @@ static const PspMenuItemDef
     MENU_ITEM(RES_S_UI_MODE,OPTION_CONTROL_MODE,ControlModeOptions,-1,RES_S_CHANGE_OK_CANCEL),
     MENU_ITEM(RES_S_ANIMATIONS,OPTION_ANIMATE,ToggleOptions,-1,RES_S_ENABLE_DISABLE_ANIM),
     MENU_END_ITEMS
+  },
+  SystemMenuDef[] = {
+    MENU_HEADER(RES_S_SYSTEM),
+    MENU_ITEM(RES_S_RESET, SYSTEM_RESET, NULL, -1, RES_S_RESET_HELP),
+    MENU_ITEM(RES_S_SAVE_SCR,  SYSTEM_SCRNSHOT, NULL, -1, RES_S_SAVE_SCR_HELP),
+    MENU_END_ITEMS
   };
 
 /* Tab labels */
-/*
 static const char *TabLabel[] = 
 { RES_S_GAME_TAB, RES_S_SAVE_LOAD_TAB, RES_S_CONTROL_TAB, RES_S_OPTION_TAB,
 RES_S_SYSTEM_TAB, RES_S_ABOUT_TAB };
-*/
-static const char *TabLabel[] = 
-{
-  "Game",
-  "Save/Load",
-/*
-  "System",
-*/
-  "Controls",
-  "Options",
-  "About"
-};
 
 static PspImage* LoadStateIcon(const char *path);
 static int LoadState(const char *path);
@@ -269,6 +258,8 @@ static int  OnGenericButtonPress(const PspUiFileBrowser *browser,
 static int OnSplashButtonPress(const struct PspUiSplash *splash, 
                                u32 button_mask);
 static void OnSplashRender(const void *uiobject, const void *null);
+
+static void OnSystemRender(const void *uiobject, const void *item_obj);
 
 static int OnQuickloadOk(const void *browser, const void *path);
 
@@ -300,6 +291,16 @@ PspUiSplash SplashScreen =
   OnGenericCancel,
   OnSplashButtonPress,
   NULL
+};
+
+PspUiMenu SystemUiMenu =
+{
+  NULL,                  /* PspMenu */
+  OnSystemRender,        /* OnRender() */
+  OnMenuOk,              /* OnOk() */
+  OnGenericCancel,       /* OnCancel() */
+  OnMenuButtonPress,     /* OnButtonPress() */
+  OnMenuItemChanged,     /* OnItemChanged() */
 };
 
 PspUiFileBrowser QuickloadBrowser = 
@@ -425,6 +426,10 @@ int InitMenu()
     pspMenuSetHelpText(item, EmptySlotText);
   }
 
+  /* Initialize system menu */
+  SystemUiMenu.Menu = pspMenuCreate();
+  pspMenuLoad(SystemUiMenu.Menu, SystemMenuDef);
+
   /* Load default configuration */
   LoadGameConfig(DefaultConfigFile, &DefaultConfig);
   LoadGameConfig(NULL, &ActiveGameConfig);
@@ -478,22 +483,9 @@ void DisplayMenu()
     case TAB_STATE:
       ShowStateTab();
       break;
-/*
     case TAB_SYSTEM:
-      item = pspMenuFindItemById(SystemUiMenu.Menu, SYSTEM_STEREO);
-      pspMenuSelectOptionByValue(item, (void*)stereo_enabled);
-      item = pspMenuFindItemById(SystemUiMenu.Menu, SYSTEM_DRIVE);
-      pspMenuModifyOption(item->Options,
-        pspFileIoGetFilename(sio_filename[0]), NULL);
-      item = pspMenuFindItemById(SystemUiMenu.Menu, SYSTEM_MACHINE_TYPE);
-      pspMenuSelectOptionByValue(item, (void*)(MACHINE_TYPE(machine_type, ram_size)));
-      item = pspMenuFindItemById(SystemUiMenu.Menu, SYSTEM_CROP_SCREEN);
-      pspMenuSelectOptionByValue(item, (void*)CropScreen);
-      item = pspMenuFindItemById(SystemUiMenu.Menu, SYSTEM_TV_MODE);
-      pspMenuSelectOptionByValue(item, (void*)tv_mode);
       pspUiOpenMenu(&SystemUiMenu, NULL);
       break;
-*/
     case TAB_ABOUT:
       pspUiSplashScreen(&SplashScreen);
       break;
@@ -522,7 +514,7 @@ void OnSplashRender(const void *splash, const void *null)
   int fh, i, x, y, height;
   const char *lines[] = 
   { 
-    PSP_APP_NAME" version "PSP_APP_VER" ("__DATE__")",
+    RES_S_APP_NAME,
     "\026http://psp.akop.org/caprice32",
     " ",
     "2007 Akop Karapetyan (port)",
@@ -618,7 +610,15 @@ int OnGenericButtonPress(const PspUiFileBrowser *browser, const char *path,
 
 int OnQuickloadOk(const void *browser, const void *path)
 {
-  /* TODO: Load game */
+  /* Load game */
+  int err;
+  if ((err = dsk_load((char*)path, &driveA, 'A')))
+  {
+    char foo[128];
+    sprintf(foo,"error %i 0x%x", err, err);
+    pspUiAlert(foo);
+    return 0;
+  }
 
   /* Reset loaded game */
   if (LoadedGame) free(LoadedGame);
@@ -628,8 +628,8 @@ int OnQuickloadOk(const void *browser, const void *path)
   if (GamePath) free(GamePath);
   GamePath = pspFileGetParentDirectory(LoadedGame);
 
-  /* TODO: Load control set */
-  // LoadGameConfig(LoadedGame, &ActiveGameConfig);
+  /* Load control set */
+  LoadGameConfig(LoadedGame, &ActiveGameConfig);
 
   ResumeEmulation = 1;
   // TODO: Coldstart();
@@ -644,7 +644,7 @@ int OnMenuItemChanged(const struct PspUiMenu *uimenu, PspMenuItem* item,
   {
     ActiveGameConfig.ButtonMap[item->ID] = (unsigned int)option->Value;
   }
-  else if (uimenu == &OptionUiMenu)
+  else
   {
     switch(item->ID)
     {
@@ -693,6 +693,24 @@ int OnMenuOk(const void *uimenu, const void* sel_item)
     if (SaveGameConfig(config_name, &ActiveGameConfig)) 
       pspUiAlert("Layout saved successfully");
     else pspUiAlert("ERROR: Changes not saved");
+  }
+  else
+  {
+    PspMenuItem *item = (PspMenuItem*)sel_item;
+    switch(item->ID)
+    {
+    case SYSTEM_RESET:
+      if (!pspUiConfirm(RES_S_RESET_SYSTEM)) return 1;
+      emulator_reset(false);
+      ResumeEmulation = 1;
+      break;
+    case SYSTEM_SCRNSHOT:
+      if (pspUtilSavePngSeq(ScreenshotPath, (LoadedGame) 
+          ? pspFileGetFilename(LoadedGame) : EmptyCartName, Screen))
+        pspUiAlert(RES_S_SAVED_SUCC);
+      else pspUiAlert(RES_S_ERROR_NOT_SAVED);
+      break;
+    }
   }
 
   return 0;
@@ -841,6 +859,23 @@ int OnSaveStateButtonPress(const PspUiGallery *gallery, PspMenuItem *sel,
   }
 
   return OnGenericButtonPress(NULL, NULL, button_mask);
+}
+
+/* Handles any special drawing for the system menu */
+void OnSystemRender(const void *uiobject, const void *item_obj)
+{
+  int w, h, x, y;
+  w = Screen->Viewport.Width >> 1;
+  h = Screen->Viewport.Height >> 1;
+  x = SCR_WIDTH - w - 8;
+  y = (SCR_HEIGHT/2) - (h/2);
+
+  /* Draw a small representation of the screen */
+  pspVideoShadowRect(x, y, x + w - 1, y + h - 1, PSP_COLOR_BLACK, 3);
+  pspVideoPutImage(Screen, x, y, w, h);
+  pspVideoDrawRect(x, y, x + w - 1, y + h - 1, PSP_COLOR_GRAY);
+
+  OnGenericRender(uiobject, item_obj);
 }
 
 /* Load options */
@@ -1133,6 +1168,7 @@ void TrashMenu()
 
   /* Destroy menu objects */
   pspMenuDestroy(SaveStateGallery.Menu);
-  if (OptionUiMenu.Menu) pspMenuDestroy(OptionUiMenu.Menu);
-  if (ControlUiMenu.Menu) pspMenuDestroy(ControlUiMenu.Menu);
+  pspMenuDestroy(OptionUiMenu.Menu);
+  pspMenuDestroy(ControlUiMenu.Menu);
+  pspMenuDestroy(SystemUiMenu.Menu);
 }
