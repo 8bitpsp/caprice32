@@ -1153,26 +1153,14 @@ void video_set_palette()
 int video_init()
 {
   CPC.scr_bpp = Screen->Depth;
+  dwXScale = dwYScale = 1;
 
-  dwXScale = 1;
-  dwYScale = 1;
+  CPC.scr_prerendernorm = (void(*)(void))prerender_normal_direct;
+  CPC.scr_prerenderbord = (void(*)(void))prerender_border_direct;
+  CPC.scr_prerendersync = (void(*)(void))prerender_sync_direct;
+  CPC.scr_render = NULL;
 
-/* TODO */
-  switch (dwXScale)
-  {
-  case 1:
-    CPC.scr_prerendernorm = (void(*)(void))prerender_normal_half;
-    CPC.scr_prerenderbord = (void(*)(void))prerender_border_half;
-    CPC.scr_prerendersync = (void(*)(void))prerender_sync_half;
-    break;
-  case 2:
-    CPC.scr_prerendernorm = (void(*)(void))prerender_normal;
-    CPC.scr_prerenderbord = (void(*)(void))prerender_border;
-    CPC.scr_prerendersync = (void(*)(void))prerender_sync;
-    break;
-  }
-
-/* TODO */
+/* TODO *
   switch(CPC.scr_bpp)
   {
   case 15:
@@ -1183,7 +1171,7 @@ int video_init()
     CPC.scr_render = (void(*)(void))render8bpp;
     break;
   }
-
+*/
   video_set_palette(); // init CPC colours
 
   // rendered screen line length (changing bytes to dwords)

@@ -849,7 +849,14 @@ void prerender_border_half(void)
    RendPos += 2;
 }
 
-
+void prerender_border_direct(void)
+{
+   register word *pwPos = (word *)CPC.scr_pos;
+   register byte bCount = *RendWid++;
+   while (bCount--) *pwPos++ = GateArray.palette[0x10];
+   CPC.scr_pos = (dword *)pwPos;
+   RendPos += 2;
+}
 
 void prerender_sync(void)
 {
@@ -871,7 +878,14 @@ void prerender_sync_half(void)
    RendPos += 2;
 }
 
-
+void prerender_sync_direct(void)
+{
+   register word *pwPos = (word *)CPC.scr_pos;
+   register byte bCount = *RendWid++;
+   while (bCount--) *pwPos++ = GateArray.palette[0x11];
+   CPC.scr_pos = (dword *)pwPos;
+   RendPos += 2;
+}
 
 void prerender_normal(void)
 {
@@ -895,6 +909,22 @@ void prerender_normal_half(void)
    RendPos += 2;
 }
 
+void prerender_normal_direct(void)
+{
+   register word *pwPos = (word *)CPC.scr_pos;
+   register byte bCount = *RendWid++;
+   register byte bVidMem;
+
+   /* TODO: write proper values to pwPos */
+   while (bCount--) *pwPos++ = GateArray.palette[0x10];
+/*
+   bVidMem = *(pbRAM + CRTC.next_address);
+   write_dword(RendPos, read_dword(ModeMap + bVidMem));
+   bVidMem = *(pbRAM + CRTC.next_address + 1);
+   write_dword(RendPos + 1, read_dword(ModeMap + bVidMem));
+*/
+   RendPos += 2;
+}
 
 
 void set_prerender(void)
@@ -1032,7 +1062,8 @@ void crtc_cycle(int repeat_count)
                set_prerender(); // change pre-renderer if necessary
             }
             PreRender(); // translate CPC video memory bytes to entries referencing the palette
-            CPC.scr_render(); // render to the video surface at the current bit depth
+            if (CPC.scr_render)
+              CPC.scr_render(); // render to the video surface at the current bit depth
          }
       }
       CRTC.next_address = MAXlate[(CRTC.addr + CRTC.char_count) & 0x73ff] | CRTC.scr_base; // next address for PreRender
