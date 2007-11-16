@@ -611,12 +611,9 @@ int OnGenericButtonPress(const PspUiFileBrowser *browser, const char *path,
 int OnQuickloadOk(const void *browser, const void *path)
 {
   /* Load game */
-  int err;
-  if ((err = dsk_load((char*)path, &driveA, 'A')))
+  if (dsk_load((char*)path, &driveA, 'A'))
   {
-    char foo[128];
-    sprintf(foo,"error %i 0x%x", err, err);
-    pspUiAlert(foo);
+    pspUiAlert("Error loading disk image");
     return 0;
   }
 

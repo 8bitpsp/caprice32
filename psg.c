@@ -51,7 +51,7 @@
 /* Alignment from SMS Plus by Charles MacDonald */
 static inline word read_word(void *address)
 {
-  if ((dword)address & 3)
+  if ((dword)address & 1)
   {
 #ifdef LSB_FIRST  /* little endian version */
     return ( *((byte *)address) +
@@ -68,7 +68,7 @@ static inline word read_word(void *address)
 
 static __inline__ void write_word(void *address, word data)
 {
-  if ((dword)address & 3)
+  if ((dword)address & 1)
   {
 #ifdef LSB_FIRST
     *((byte *)address) =    data;

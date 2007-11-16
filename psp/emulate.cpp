@@ -86,8 +86,7 @@ fclose(foo);
   CPC.jumpers = 0x1e; // OEM is Amstrad, video refresh is 50Hz
   CPC.ram_size = 128 & 0x02c0; // 128KB RAM
   CPC.speed = DEF_SPEED_SETTING; // original CPC speed
-  CPC.limit_speed = 1;
-  CPC.auto_pause = 1;
+  CPC.limit_speed = 0;
   CPC.printer = 0;
   CPC.mf2 = 0;
   CPC.keyboard = 0;
@@ -258,18 +257,12 @@ void RunEmulation()
     /* Process key events */
     if (ParseInput()) break;
 
-    if (CPC.limit_speed)
+    /* Wait if needed */
+    if (z80_exit == EC_CYCLE_COUNT && Options.LimitSpeed)
     {
-      if (z80_exit == EC_CYCLE_COUNT)
-      {
-        /* Wait if needed */
-        if (Options.LimitSpeed)
-        {
-          do { sceRtcGetCurrentTick(&current_tick); }
-          while (current_tick - LastTick < TicksPerUpdate);
-          LastTick = current_tick;
-        }
-      }
+      do { sceRtcGetCurrentTick(&current_tick); }
+      while (current_tick - LastTick < TicksPerUpdate);
+      LastTick = current_tick;
     }
 
     dwOffset = CPC.scr_pos - CPC.scr_base; // offset in current surface row

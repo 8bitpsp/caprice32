@@ -19,7 +19,7 @@ OBJS=$(BUILD_APP) $(BUILD_PSPAPP)
 
 DEFINES=-DLSB_FIRST -DALIGN_DWORD
 BASE_DEFS=-DPSP -DPSP_APP_VER=\"$(PSP_APP_VER)\" -DPSP_APP_NAME="\"$(PSP_APP_NAME)\""
-CFLAGS=-O2 -G0 -Wall $(BASE_DEFS) $(DEFINES)
+CFLAGS=-O2 -G0 -Wall $(BASE_DEFS) $(DEFINES) -funroll-loops -ffast-math -fomit-frame-pointer -fno-strength-reduce -finline-functions -s
 CXXFLAGS=$(CFLAGS) -fno-exceptions -fno-rtti
 ASFLAGS=$(CFLAGS)
 INCDIR=$(PSPLIB) .

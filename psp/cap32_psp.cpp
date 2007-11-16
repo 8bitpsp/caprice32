@@ -1213,162 +1213,158 @@ void tape_eject (void)
   pbTapeImage = NULL;
 }
 
-
-
 int tape_insert (char *pchFileName)
 {
-  long lFileSize;
-  int iBlockLength;
-  byte bID;
-  byte *pbPtr, *pbBlock;
+   long lFileSize;
+   int iBlockLength;
+   byte bID;
+   byte *pbPtr, *pbBlock;
 
-  tape_eject();
-  if ((pfileObject = fopen(pchFileName, "rb")) == NULL) {
-    return ERR_FILE_NOT_FOUND;
-  }
-  fread(pbGPBuffer, 10, 1, pfileObject); // read CDT header
-  pbPtr = pbGPBuffer;
-  if (memcmp(pbPtr, "ZXTape!\032", 8) != 0) { // valid CDT file?
-    fclose(pfileObject);
-    return ERR_TAP_INVALID;
-  }
-  if (*(pbPtr + 0x08) != 1) { // major version must be 1
-    fclose(pfileObject);
-    return ERR_TAP_INVALID;
-  }
-  lFileSize = file_size(fileno(pfileObject)) - 0x0a;
-  if (lFileSize <= 0) { // the tape image should have at least one block...
-    fclose(pfileObject);
-    return ERR_TAP_INVALID;
-  }
-  pbTapeImage = (byte *)malloc(lFileSize+6);
-  *pbTapeImage = 0x20; // start off with a pause block
-  *(word *)(pbTapeImage+1) = 2000; // set the length to 2 seconds
-  fread(pbTapeImage+3, lFileSize, 1, pfileObject); // append the entire CDT file
-  fclose(pfileObject);
-  *(pbTapeImage+lFileSize+3) = 0x20; // end with a pause block
-  *(word *)(pbTapeImage+lFileSize+3+1) = 2000; // set the length to 2 seconds
+   tape_eject();
+   if ((pfileObject = fopen(pchFileName, "rb")) == NULL) {
+      return ERR_FILE_NOT_FOUND;
+   }
+   fread(pbGPBuffer, 10, 1, pfileObject); // read CDT header
+   pbPtr = pbGPBuffer;
+   if (memcmp(pbPtr, "ZXTape!\032", 8) != 0) { // valid CDT file?
+      fclose(pfileObject);
+      return ERR_TAP_INVALID;
+   }
+   if (*(pbPtr + 0x08) != 1) { // major version must be 1
+      fclose(pfileObject);
+      return ERR_TAP_INVALID;
+   }
+   lFileSize = file_size(fileno(pfileObject)) - 0x0a;
+   if (lFileSize <= 0) { // the tape image should have at least one block...
+      fclose(pfileObject);
+      return ERR_TAP_INVALID;
+   }
+   pbTapeImage = (byte *)malloc(lFileSize+6);
+   *pbTapeImage = 0x20; // start off with a pause block
+   *(word *)(pbTapeImage+1) = 2000; // set the length to 2 seconds
+   fread(pbTapeImage+3, lFileSize, 1, pfileObject); // append the entire CDT file
+   fclose(pfileObject);
+   *(pbTapeImage+lFileSize+3) = 0x20; // end with a pause block
+   *(word *)(pbTapeImage+lFileSize+3+1) = 2000; // set the length to 2 seconds
 
-#ifdef DEBUG_TAPE
-  fputs("--- New Tape\r\n", pfoDebug);
-#endif
-  pbTapeImageEnd = pbTapeImage + lFileSize+6;
-  pbBlock = pbTapeImage;
-  bool bolGotDataBlock = false;
-  while (pbBlock < pbTapeImageEnd) {
-    bID = *pbBlock++;
-    switch(bID) {
-      case 0x10: // standard speed data block
-        iBlockLength = *(word *)(pbBlock+2) + 4;
-        bolGotDataBlock = true;
-        break;
-        case 0x11: // turbo loading data block
-          iBlockLength = (*(dword *)(pbBlock+0x0f) & 0x00ffffff) + 0x12;
-          bolGotDataBlock = true;
-          break;
-          case 0x12: // pure tone
+   #ifdef DEBUG_TAPE
+   fputs("--- New Tape\r\n", pfoDebug);
+   #endif
+   pbTapeImageEnd = pbTapeImage + lFileSize+6;
+   pbBlock = pbTapeImage;
+   bool bolGotDataBlock = false;
+   while (pbBlock < pbTapeImageEnd) {
+      bID = *pbBlock++;
+      switch(bID) {
+         case 0x10: // standard speed data block
+            iBlockLength = *(word *)(pbBlock+2) + 4;
+            bolGotDataBlock = true;
+            break;
+         case 0x11: // turbo loading data block
+            iBlockLength = (*(dword *)(pbBlock+0x0f) & 0x00ffffff) + 0x12;
+            bolGotDataBlock = true;
+            break;
+         case 0x12: // pure tone
             iBlockLength = 4;
             bolGotDataBlock = true;
             break;
-            case 0x13: // sequence of pulses of different length
-              iBlockLength = *pbBlock * 2 + 1;
-              bolGotDataBlock = true;
-              break;
-              case 0x14: // pure data block
-                iBlockLength = (*(dword *)(pbBlock+0x07) & 0x00ffffff) + 0x0a;
-                bolGotDataBlock = true;
-                break;
-                case 0x15: // direct recording
-                  iBlockLength = (*(dword *)(pbBlock+0x05) & 0x00ffffff) + 0x08;
-                  bolGotDataBlock = true;
-                  break;
-                  case 0x20: // pause
-                    if ((!bolGotDataBlock) && (pbBlock != pbTapeImage+1)) {
-                      *(word *)pbBlock = 0; // remove any pauses (execept ours) before the data starts
-                    }
-                    iBlockLength = 2;
-                    break;
-                    case 0x21: // group start
-                      iBlockLength = *pbBlock + 1;
-                      break;
-                      case 0x22: // group end
-                        iBlockLength = 0;
-                        break;
-                        case 0x23: // jump to block
-                          return ERR_TAP_UNSUPPORTED;
-                          iBlockLength = 2;
-                          break;
-                          case 0x24: // loop start
-                            return ERR_TAP_UNSUPPORTED;
-                            iBlockLength = 2;
-                            break;
-                            case 0x25: // loop end
-                              return ERR_TAP_UNSUPPORTED;
-                              iBlockLength = 0;
-                              break;
-                              case 0x26: // call sequence
-                                return ERR_TAP_UNSUPPORTED;
-                                iBlockLength = (*(word *)pbBlock * 2) + 2;
-                                break;
-                                case 0x27: // return from sequence
-                                  return ERR_TAP_UNSUPPORTED;
-                                  iBlockLength = 0;
-                                  break;
-                                  case 0x28: // select block
-                                    return ERR_TAP_UNSUPPORTED;
-                                    iBlockLength = *(word *)pbBlock + 2;
-                                    break;
-                                    case 0x30: // text description
-                                      iBlockLength = *pbBlock + 1;
-                                      break;
-                                      case 0x31: // message block
-                                        iBlockLength = *(pbBlock+1) + 2;
-                                        break;
-                                        case 0x32: // archive info
-                                          iBlockLength = *(word *)pbBlock + 2;
-                                          break;
-                                          case 0x33: // hardware type
-                                            iBlockLength = (*pbBlock * 3) + 1;
-                                            break;
-                                            case 0x34: // emulation info
-                                              iBlockLength = 8;
-                                              break;
-                                              case 0x35: // custom info block
-                                                iBlockLength = *(dword *)(pbBlock+0x10) + 0x14;
-                                                break;
-                                                case 0x40: // snapshot block
-                                                  iBlockLength = (*(dword *)(pbBlock+0x01) & 0x00ffffff) + 0x04;
-                                                  break;
-                                                  case 0x5A: // another tzx/cdt file
-                                                    iBlockLength = 9;
-                                                    break;
+         case 0x13: // sequence of pulses of different length
+            iBlockLength = *pbBlock * 2 + 1;
+            bolGotDataBlock = true;
+            break;
+         case 0x14: // pure data block
+            iBlockLength = (*(dword *)(pbBlock+0x07) & 0x00ffffff) + 0x0a;
+            bolGotDataBlock = true;
+            break;
+         case 0x15: // direct recording
+            iBlockLength = (*(dword *)(pbBlock+0x05) & 0x00ffffff) + 0x08;
+            bolGotDataBlock = true;
+            break;
+         case 0x20: // pause
+            if ((!bolGotDataBlock) && (pbBlock != pbTapeImage+1)) {
+               *(word *)pbBlock = 0; // remove any pauses (execept ours) before the data starts
+            }
+            iBlockLength = 2;
+            break;
+         case 0x21: // group start
+            iBlockLength = *pbBlock + 1;
+            break;
+         case 0x22: // group end
+            iBlockLength = 0;
+            break;
+         case 0x23: // jump to block
+   return ERR_TAP_UNSUPPORTED;
+            iBlockLength = 2;
+            break;
+         case 0x24: // loop start
+   return ERR_TAP_UNSUPPORTED;
+            iBlockLength = 2;
+            break;
+         case 0x25: // loop end
+   return ERR_TAP_UNSUPPORTED;
+            iBlockLength = 0;
+            break;
+         case 0x26: // call sequence
+   return ERR_TAP_UNSUPPORTED;
+            iBlockLength = (*(word *)pbBlock * 2) + 2;
+            break;
+         case 0x27: // return from sequence
+   return ERR_TAP_UNSUPPORTED;
+            iBlockLength = 0;
+            break;
+         case 0x28: // select block
+   return ERR_TAP_UNSUPPORTED;
+            iBlockLength = *(word *)pbBlock + 2;
+            break;
+         case 0x30: // text description
+            iBlockLength = *pbBlock + 1;
+            break;
+         case 0x31: // message block
+            iBlockLength = *(pbBlock+1) + 2;
+            break;
+         case 0x32: // archive info
+            iBlockLength = *(word *)pbBlock + 2;
+            break;
+         case 0x33: // hardware type
+            iBlockLength = (*pbBlock * 3) + 1;
+            break;
+         case 0x34: // emulation info
+            iBlockLength = 8;
+            break;
+         case 0x35: // custom info block
+            iBlockLength = *(dword *)(pbBlock+0x10) + 0x14;
+            break;
+         case 0x40: // snapshot block
+            iBlockLength = (*(dword *)(pbBlock+0x01) & 0x00ffffff) + 0x04;
+            break;
+         case 0x5A: // another tzx/cdt file
+            iBlockLength = 9;
+            break;
 
-                                                    default: // "extension rule"
-                                                      iBlockLength = *(dword *)pbBlock + 4;
-    }
+         default: // "extension rule"
+            iBlockLength = *(dword *)pbBlock + 4;
+      }
 
-#ifdef DEBUG_TAPE
-    fprintf(pfoDebug, "%02x %d\r\n", bID, iBlockLength);
-#endif
+      #ifdef DEBUG_TAPE
+      fprintf(pfoDebug, "%02x %d\r\n", bID, iBlockLength);
+      #endif
 
-    pbBlock += iBlockLength;
-  }
-  if (pbBlock != pbTapeImageEnd) {
-    tape_eject();
-    return ERR_TAP_INVALID;
-  }
+      pbBlock += iBlockLength;
+   }
+   if (pbBlock != pbTapeImageEnd) {
+      tape_eject();
+      return ERR_TAP_INVALID;
+   }
 
-  Tape_Rewind();
+   Tape_Rewind();
 
 /* char *pchTmpBuffer = new char[MAX_LINE_LEN];
-  LoadString(hAppInstance, MSG_TAP_INSERT, chMsgBuffer, sizeof(chMsgBuffer));
-  snprintf(pchTmpBuffer, _MAX_PATH-1, chMsgBuffer, CPC.tape_file);
-  add_message(pchTmpBuffer);
-  delete [] pchTmpBuffer; */
-  return 0;
+   LoadString(hAppInstance, MSG_TAP_INSERT, chMsgBuffer, sizeof(chMsgBuffer));
+   snprintf(pchTmpBuffer, _MAX_PATH-1, chMsgBuffer, CPC.tape_file);
+   add_message(pchTmpBuffer);
+   delete [] pchTmpBuffer; */
+   return 0;
 }
-
-
 
 int tape_insert_voc (char *pchFileName)
 {
