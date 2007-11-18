@@ -269,7 +269,89 @@ typedef struct {
    char rom_path[_MAX_PATH + 1];
    char rom_file[16][_MAX_PATH + 1];
    char rom_mf2[_MAX_PATH + 1];
+#ifdef CRTC_4_1_0
+   unsigned int scr_offs;
+   unsigned int scr_line;
+#endif
 } t_CPC;
+
+#ifdef CRTC_4_1_0
+typedef struct {
+  unsigned char ROM_config;
+  unsigned char RAM_bank;
+  unsigned char RAM_config;
+  unsigned char upper_ROM;
+  void (*requested_scr_mode)(unsigned int addr);
+  void (*scr_mode)(unsigned int addr);
+  void (*scr_border)(void);
+  unsigned char pen;
+  unsigned char ink_values[17];
+  unsigned int palette[17];
+  unsigned char sl_count;
+  unsigned char int_delay;
+} t_GateArray;
+
+typedef struct {
+  unsigned int hsw;
+  unsigned int hsw_active;
+  unsigned int hsw_count;
+  unsigned int vsw_count;
+  unsigned int hdelay;
+  unsigned int vdelay;
+  unsigned int scanline;
+  unsigned int scanline_min;
+  unsigned int frame_completed;
+  unsigned int char_count;
+  unsigned int hcount;
+  unsigned int hstart;
+  unsigned int hwidth;
+  unsigned int vcount;
+  unsigned int vstart;
+  unsigned int vheight;
+} t_VDU;
+
+typedef struct {
+  unsigned int flags;
+  unsigned int requested_addr;
+  unsigned int addr;
+  unsigned char char_count;
+  unsigned char line_count;
+  unsigned char raster_count;
+  unsigned char hsw;
+  unsigned char hsw_active;
+  unsigned char hsw_count;
+  unsigned char vsw;
+  unsigned char vsw_count;
+  unsigned char vt_adjust;
+  unsigned char vt_adjust_count;
+  unsigned char skew;
+  unsigned char max_raster;
+  unsigned char last_hdisp;
+  unsigned char reg_select;
+  unsigned char registers[18];
+} t_CRTC;
+#else
+typedef struct {
+  unsigned int hs_count;
+  unsigned char ROM_config;
+  unsigned char RAM_bank;
+  unsigned char RAM_config;
+  unsigned char upper_ROM;
+  unsigned int requested_scr_mode;
+  unsigned int scr_mode;
+  unsigned char pen;
+  unsigned char ink_values[17];
+  unsigned int palette[19];
+  unsigned char sl_count;
+  unsigned char int_delay;
+} t_GateArray;
+
+typedef struct {
+  int scrln;
+  int scanline;
+  unsigned int flag_drawing;
+  unsigned int frame_completed;
+} t_VDU;
 
 typedef struct {
    unsigned int requested_addr;
@@ -306,6 +388,7 @@ typedef struct {
    unsigned char reg_select;
    unsigned char registers[18];
 } t_CRTC;
+#endif
 
 typedef struct {
    int timeout;
@@ -324,21 +407,6 @@ typedef struct {
    unsigned char command[12];
    unsigned char result[8];
 } t_FDC;
-
-typedef struct {
-	unsigned int hs_count;
-   unsigned char ROM_config;
-   unsigned char RAM_bank;
-   unsigned char RAM_config;
-   unsigned char upper_ROM;
-   unsigned int requested_scr_mode;
-   unsigned int scr_mode;
-   unsigned char pen;
-   unsigned char ink_values[17];
-   unsigned int palette[19];
-   unsigned char sl_count;
-   unsigned char int_delay;
-} t_GateArray;
 
 typedef struct {
    unsigned char control;
@@ -377,13 +445,6 @@ typedef struct {
    bool FirstPeriod;
    void (*Synthesizer)(void);
 } t_PSG;
-
-typedef struct {
-   int scrln;
-   int scanline;
-   unsigned int flag_drawing;
-   unsigned int frame_completed;
-} t_VDU;
 
 typedef struct {
    unsigned char CHRN[4]; // the CHRN for this sector

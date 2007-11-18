@@ -697,10 +697,11 @@ int OnMenuOk(const void *uimenu, const void* sel_item)
     switch(item->ID)
     {
     case SYSTEM_RESET:
-      if (!pspUiConfirm(RES_S_RESET_SYSTEM)) return 1;
+      if (!pspUiConfirm(RES_S_RESET_SYSTEM))
+        return 1;
       emulator_reset(false);
       ResumeEmulation = 1;
-      break;
+      return 1;
     case SYSTEM_SCRNSHOT:
       if (pspUtilSavePngSeq(ScreenshotPath, (LoadedGame) 
           ? pspFileGetFilename(LoadedGame) : EmptyCartName, Screen))

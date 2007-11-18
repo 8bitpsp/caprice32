@@ -169,6 +169,7 @@ extern byte keyboard_matrix[16];
 extern dword cpc_kbd[3][149];
 
 int  video_init();
+void video_init_tables();
 int  audio_init();
 void audio_shutdown();
 

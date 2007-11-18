@@ -12,12 +12,14 @@ EXTRA_TARGETS=EBOOT.PBP
 PSP_EBOOT_TITLE=$(PSP_APP_NAME) $(PSP_APP_VER)
 PSP_EBOOT_ICON=$(DATA)/caprice-icon.png
 
-BUILD_APP=z80.o crtc.o fdc.o tape.o psg.o psp/cap32_psp.o
-BUILD_PSPAPP=$(PSPAPP)/main.o $(PSPAPP)/emulate.o $(PSPAPP)/menu.o
+BUILD_APP=z80.o fdc.o tape.o psg.o 4.1.0/crtc.o
+#crtc.o 
+BUILD_PSPAPP=$(PSPAPP)/main.o $(PSPAPP)/emulate.o $(PSPAPP)/menu.o \
+             $(PSPAPP)/cap32_psp.o
 
 OBJS=$(BUILD_APP) $(BUILD_PSPAPP)
 
-DEFINES=-DLSB_FIRST -DALIGN_DWORD
+DEFINES=-DLSB_FIRST -DALIGN_DWORD -DCRTC_4_1_0
 BASE_DEFS=-DPSP -DPSP_APP_VER=\"$(PSP_APP_VER)\" -DPSP_APP_NAME="\"$(PSP_APP_NAME)\""
 CFLAGS=-O2 -G0 -Wall $(BASE_DEFS) $(DEFINES) -funroll-loops -ffast-math -fomit-frame-pointer -fno-strength-reduce -finline-functions -s
 CXXFLAGS=$(CFLAGS) -fno-exceptions -fno-rtti
@@ -29,16 +31,19 @@ LIBS=-lmypsp -lpng -lm -lstdc++ -lc -lz -lpspgu -lpsppower -lpspaudio -lpsprtc
 include $(PSPSDK)/lib/build.mak
 
 z80.o: z80.c z80.h cap32.h
-	psp-g++ $(CXXFLAGS) -c z80.c
+	psp-g++ $(CXXFLAGS) -c -o $@ $<
 
 crtc.o: crtc.c cap32.h crtc.h z80.h
-	psp-g++ $(CXXFLAGS) -c crtc.c
+	psp-g++ $(CXXFLAGS) -c -o $@ $<
+
+4.1.0/crtc.o: 4.1.0/crtc.c cap32.h 4.1.0/crtc.h z80.h
+	psp-g++ $(CXXFLAGS) -c -o $@ $<
 
 fdc.o: fdc.c cap32.h z80.h
-	psp-g++ $(CXXFLAGS) -c fdc.c
+	psp-g++ $(CXXFLAGS) -c -o $@ $<
 
 tape.o: tape.c cap32.h tape.h z80.h
-	psp-g++ $(CXXFLAGS) -c tape.c
+	psp-g++ $(CXXFLAGS) -c -o $@ $<
 
 psg.o: psg.c cap32.h z80.h
-	psp-g++ $(CXXFLAGS) -c psg.c
+	psp-g++ $(CXXFLAGS) -c -o $@ $<

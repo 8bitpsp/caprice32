@@ -122,7 +122,11 @@ fclose(foo);
   /* insert AMSDOS in slot 7 */
   strcpy(CPC.rom_file[7], "amsdos.rom"); 
 
+  if (CPC.printer && !printer_start())
+    CPC.printer = 0;
+
   z80_init_tables(); // init Z80 emulation
+  video_init_tables(); // generate the byte-to-pixels translation tables
 
   /* Clear keyboard matrix */
   memset(keyboard_matrix, 0xff, sizeof(keyboard_matrix));
@@ -249,7 +253,6 @@ void RunEmulation()
   pspAudioSetChannelCallback(0, AudioCallback, 0);
 
   static int z80_exit = EC_FRAME_COMPLETE;
-  dword dwOffset;
   u64 current_tick;
 
   while (!ExitPSP)
@@ -265,11 +268,8 @@ void RunEmulation()
       LastTick = current_tick;
     }
 
-    dwOffset = CPC.scr_pos - CPC.scr_base; // offset in current surface row
-    if (VDU.scrln > 0)  // determine current position
-      CPC.scr_base = (dword *)Screen->Pixels + (VDU.scrln * CPC.scr_line_offs);
-    else CPC.scr_base = (dword *)Screen->Pixels; // reset to surface start
-    CPC.scr_pos = CPC.scr_base + dwOffset; // update current rendering position
+    if (z80_exit == EC_FRAME_COMPLETE)
+      CPC.scr_base = (dword *)Screen->Pixels;
 
     z80_exit = z80_execute(); // run the emulation until an exit condition is met
 

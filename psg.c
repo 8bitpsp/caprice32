@@ -411,9 +411,6 @@ inline void Synthesizer_Logic_Q(void)
    if (Envelope_Counter.Hi >= read_word(&PSG.RegisterAY.EnvelopeLo)) {
       Envelope_Counter.Hi = 0;
    }
-//   if (Envelope_Counter.Hi >= *(word *)&PSG.RegisterAY.EnvelopeLo) {
-//      Envelope_Counter.Hi = 0;
-//   }
 }
 
 
