@@ -1998,8 +1998,6 @@ int dsk_save (char *pchFileName, t_drive *drive, char chID)
    return 0;
 }
 
-
-
 int dsk_format (t_drive *drive, int iFormat)
 {
    int iRetCode = 0;
@@ -2377,12 +2375,9 @@ int video_set_palette (void)
     for (n = 0; n < 32; n++) 
     {
       dword r = (dword)(colours_rgb[n][0] * (CPC.scr_intensity / 10.0) * 255);
-      if (r > 255) r = 255;
       dword g = (dword)(colours_rgb[n][1] * (CPC.scr_intensity / 10.0) * 255);
-      if (g > 255) g = 255;
       dword b = (dword)(colours_rgb[n][2] * (CPC.scr_intensity / 10.0) * 255);
-      if (b > 255) b = 255;
-      dword colour = RGB(r, g, b);
+      dword colour = RGB((r>255)?255:r, (g>255)?255:g, (b>255)?255:b);
       colour_table[n] = colour | colour << 16;
     }
   }
@@ -2391,8 +2386,7 @@ int video_set_palette (void)
     for (n = 0; n < 32; n++) 
     {
       dword g = (dword)(colours_green[n] * (CPC.scr_intensity / 10.0) * 255);
-      if (g > 255) g = 255;
-      dword colour = RGB(0, g, 0);
+      dword colour = RGB(0, (g>255)?255:g, 0);
       colour_table[n] = colour | colour << 16;
     }
   }

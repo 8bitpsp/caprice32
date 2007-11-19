@@ -26,6 +26,8 @@
 dword freq_table[] = { 44100 };
 
 extern EmulatorOptions Options;
+extern char *ScreenshotPath;
+extern char *LoadedGame;
 
 PspImage *Screen = NULL;
 struct GameConfig ActiveGameConfig;
@@ -60,8 +62,6 @@ static void AudioCallback(void* buf, unsigned int *length, void *userdata);
 
 static PspKeyboardLayout *Cpc464Kybd;
 
-FILE*foo; /* TODO */
-
 /* Initialize emulation */
 int InitEmulation()
 {
@@ -73,10 +73,6 @@ int InitEmulation()
   Screen->Viewport.Height = CPC_VISIBLE_SCR_HEIGHT;
 
   Cpc464Kybd = pspKybdLoadLayout("cpc464.lyt", NULL, HandleKeyInput);
-
-/* TODO */
-foo=fopen("log.txt","w");
-fclose(foo);
 
   int i;
 
@@ -103,8 +99,8 @@ fclose(foo);
   CPC.snd_enabled = 1;
   CPC.snd_playback_rate = 0;
   CPC.snd_bits = 1;
-  CPC.snd_stereo = 1;
-  CPC.snd_volume = 80;
+  CPC.snd_stereo = 0;
+  CPC.snd_volume = 100;
   CPC.snd_pp_device = 0;
 
   CPC.kbd_layout = 0;
@@ -152,7 +148,9 @@ static int ParseInput()
 #ifdef PSP_DEBUG
     if ((pad.Buttons & (PSP_CTRL_SELECT | PSP_CTRL_START))
       == (PSP_CTRL_SELECT | PSP_CTRL_START))
-        pspUtilSaveVramSeq(ScreenshotPath, pspFileGetFilename(GameName));
+        pspUtilSaveVramSeq(ScreenshotPath, 
+                           (LoadedGame) 
+                               ? pspFileGetFilename(LoadedGame) : "BASIC");
 #endif
 
     /* Navigate the virtual keyboard, if shown */
@@ -242,6 +240,8 @@ void RunEmulation()
   Frame = 0;
   ShowKybd = 0;
   ClearScreen = 1;
+
+  pspImageClear(Screen, 0);
 
   /* Init performance counter */
   pspPerfInitFps(&FpsCounter);

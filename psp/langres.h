@@ -57,6 +57,9 @@
 #define RES_S_SHOW_FPS       "Show FPS counter"
 #define RES_S_UI_MODE        "Button mode"
 #define RES_S_ANIMATIONS     "Animations"
+#define RES_S_SYSTEM         "System"
+#define RES_S_OPTIONS        "Options"
+#define RES_S_MODEL          "Model"
 
 #define RES_S_CHANGE_SCREEN_SIZE \
   "\026"PSP_CHAR_RIGHT"\020 Change screen size"
@@ -101,6 +104,11 @@
 
 /* Emulator-specific definitions */
 
+#define RES_S_SCREEN  "Monitor type"
+
+#define RES_S_SCR_COLOUR  "Colour"
+#define RES_S_SCR_MONOCHR "Monochrome"
+
 #define RES_S_KBD_UP        "Keyboard Up"
 #define RES_S_KBD_DOWN      "Keyboard Down"
 #define RES_S_KBD_LEFT      "Keyboard Left"
@@ -127,3 +135,7 @@
 #define RES_S_SPACE      "Space"
 #define RES_S_TAB        "Tab"
 
+#define RES_S_MODEL_HELP \
+  "\026"PSP_CHAR_RIGHT"\020 Select CPC hardware model"
+#define RES_S_SCREEN_HELP \
+  "\026"PSP_CHAR_RIGHT"\020 Select type of emulated monitor"

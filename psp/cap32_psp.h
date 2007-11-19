@@ -169,6 +169,7 @@ extern byte keyboard_matrix[16];
 extern dword cpc_kbd[3][149];
 
 int  video_init();
+int  video_set_palette();
 void video_init_tables();
 int  audio_init();
 void audio_shutdown();
@@ -189,6 +190,8 @@ void printer_stop(void);
 void dsk_eject (t_drive *drive);
 int  dsk_load (char *pchFileName, t_drive *drive, char chID);
 
+int  tape_insert (char *pchFileName);
+int  tape_insert_voc (char *pchFileName);
 void tape_eject (void);
 
 #endif // _CAP32_PSP_H

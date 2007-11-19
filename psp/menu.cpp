@@ -28,6 +28,8 @@
 
 #define SYSTEM_SCRNSHOT     0x11
 #define SYSTEM_RESET        0x12
+#define SYSTEM_MODEL        0x13
+#define SYSTEM_SCREEN       0x14
 
 #define OPTION_DISPLAY_MODE 0x21
 #define OPTION_FRAMESKIP    0x22
@@ -75,7 +77,7 @@ static const char
   *SaveStateDir = "savedata",
   *ConfigDir = "config",
   *DefaultConfigFile = "default",
-  *QuickloadFilter[] = { "DSK", '\0' },
+  *QuickloadFilter[] = { "DSK", "CDT", "VOC", '\0' },
   PresentSlotText[] = RES_S_PRESENT_SLOT_TEXT,
   EmptySlotText[]   = RES_S_EMPTY_SLOT_TEXT,
   ControlHelpText[] = RES_S_CONTROL_HELP_TEXT;
@@ -118,6 +120,17 @@ static const PspMenuOptionDef
     MENU_OPTION(RES_S_UI_JAPAN, 1),
     MENU_END_OPTIONS
   },
+  ModelOptions[] = {
+    MENU_OPTION("CPC 464",  0),
+    MENU_OPTION("CPC 664",  1),
+    MENU_OPTION("CPC 6128", 2),
+    MENU_END_OPTIONS
+  },
+  ScreenOptions[] = {
+    MENU_OPTION(RES_S_SCR_MONOCHR, 1),
+    MENU_OPTION(RES_S_SCR_COLOUR,  0),
+    MENU_END_OPTIONS
+  },
   ButtonMapOptions[] = {
     /* Unmapped */
     MENU_OPTION(RES_S_NONE, 0),
@@ -143,19 +156,19 @@ static const PspMenuOptionDef
     MENU_OPTION("6", KBD|CPC_6), MENU_OPTION("7", KBD|CPC_7), 
     MENU_OPTION("8", KBD|CPC_8), MENU_OPTION("9", KBD|CPC_9), 
     /* Keyboard: Letters */
-    MENU_OPTION("a", KBD|CPC_a), MENU_OPTION("b", KBD|CPC_b), 
-    MENU_OPTION("c", KBD|CPC_c), MENU_OPTION("d", KBD|CPC_d), 
-    MENU_OPTION("e", KBD|CPC_e), MENU_OPTION("f", KBD|CPC_f), 
-    MENU_OPTION("g", KBD|CPC_g), MENU_OPTION("h", KBD|CPC_h), 
-    MENU_OPTION("i", KBD|CPC_i), MENU_OPTION("j", KBD|CPC_j), 
-    MENU_OPTION("k", KBD|CPC_k), MENU_OPTION("l", KBD|CPC_l), 
-    MENU_OPTION("m", KBD|CPC_m), MENU_OPTION("n", KBD|CPC_n), 
-    MENU_OPTION("o", KBD|CPC_o), MENU_OPTION("p", KBD|CPC_p), 
-    MENU_OPTION("q", KBD|CPC_q), MENU_OPTION("r", KBD|CPC_r), 
-    MENU_OPTION("s", KBD|CPC_s), MENU_OPTION("t", KBD|CPC_t), 
-    MENU_OPTION("u", KBD|CPC_u), MENU_OPTION("v", KBD|CPC_v), 
-    MENU_OPTION("w", KBD|CPC_w), MENU_OPTION("x", KBD|CPC_x), 
-    MENU_OPTION("y", KBD|CPC_y), MENU_OPTION("z", KBD|CPC_z), 
+    MENU_OPTION("A", KBD|CPC_a), MENU_OPTION("B", KBD|CPC_b), 
+    MENU_OPTION("C", KBD|CPC_c), MENU_OPTION("D", KBD|CPC_d), 
+    MENU_OPTION("E", KBD|CPC_e), MENU_OPTION("F", KBD|CPC_f), 
+    MENU_OPTION("G", KBD|CPC_g), MENU_OPTION("H", KBD|CPC_h), 
+    MENU_OPTION("I", KBD|CPC_i), MENU_OPTION("J", KBD|CPC_j), 
+    MENU_OPTION("K", KBD|CPC_k), MENU_OPTION("L", KBD|CPC_l), 
+    MENU_OPTION("M", KBD|CPC_m), MENU_OPTION("N", KBD|CPC_n), 
+    MENU_OPTION("O", KBD|CPC_o), MENU_OPTION("P", KBD|CPC_p), 
+    MENU_OPTION("Q", KBD|CPC_q), MENU_OPTION("R", KBD|CPC_r), 
+    MENU_OPTION("S", KBD|CPC_s), MENU_OPTION("T", KBD|CPC_t), 
+    MENU_OPTION("U", KBD|CPC_u), MENU_OPTION("V", KBD|CPC_v), 
+    MENU_OPTION("W", KBD|CPC_w), MENU_OPTION("X", KBD|CPC_x), 
+    MENU_OPTION("Y", KBD|CPC_y), MENU_OPTION("Z", KBD|CPC_z), 
     /* Keyboard: Symbols */
     MENU_OPTION("@", KBD|CPC_AT), MENU_OPTION("\\",KBD|CPC_BACKSLASH), 
     MENU_OPTION(":", KBD|CPC_COLON), MENU_OPTION(",", KBD|CPC_COMMA), 
@@ -215,7 +228,7 @@ static const PspMenuItemDef
     MENU_HEADER(RES_S_PERF),
     MENU_ITEM(RES_S_FRAME_LIMITER,OPTION_FRAME_LIMIT,FrameLimitOptions,-1,RES_S_CHANGE_SCR_UPD_FREQ),
     MENU_ITEM(RES_S_FRAME_SKIPPING,OPTION_FRAMESKIP,FrameSkipOptions,-1,RES_S_CHANGE_FRAME_SKIP_PER_UPD),
-    MENU_ITEM(RES_S_VSYNC,OPTION_VSYNC,ToggleOptions,-1,RES_S_ENABLE_TO_REDUCE_TEARING),
+//    MENU_ITEM(RES_S_VSYNC,OPTION_VSYNC,ToggleOptions,-1,RES_S_ENABLE_TO_REDUCE_TEARING),
     MENU_ITEM(RES_S_PSP_CLOCK_FREQ,OPTION_CLOCK_FREQ,PspClockFreqOptions,-1,RES_S_LARGER_FASTER_DEPL),
     MENU_ITEM(RES_S_SHOW_FPS,OPTION_SHOW_FPS,ToggleOptions,-1,RES_S_SHOW_HIDE_FPS),
     MENU_HEADER(RES_S_MENU),
@@ -224,7 +237,11 @@ static const PspMenuItemDef
     MENU_END_ITEMS
   },
   SystemMenuDef[] = {
+    MENU_HEADER(RES_S_VIDEO),
+    MENU_ITEM(RES_S_SCREEN, SYSTEM_SCREEN, ScreenOptions, -1, RES_S_SCREEN_HELP),
     MENU_HEADER(RES_S_SYSTEM),
+    MENU_ITEM(RES_S_MODEL, SYSTEM_MODEL, ModelOptions, -1, RES_S_MODEL_HELP),
+    MENU_HEADER(RES_S_OPTIONS),
     MENU_ITEM(RES_S_RESET, SYSTEM_RESET, NULL, -1, RES_S_RESET_HELP),
     MENU_ITEM(RES_S_SAVE_SCR,  SYSTEM_SCRNSHOT, NULL, -1, RES_S_SAVE_SCR_HELP),
     MENU_END_ITEMS
@@ -278,7 +295,7 @@ static int ResumeEmulation;
 static PspImage *Background;
 static PspImage *NoSaveIcon;
 
-static char *LoadedGame;
+char *LoadedGame;
 static char *GamePath;
 static char *SaveStatePath;
 static char *ConfigPath;
@@ -352,6 +369,8 @@ int InitMenu()
   LoadedGame = NULL;
   GamePath = NULL;
 
+  LoadOptions();
+
   if (!InitEmulation())
     return 0;
 
@@ -365,8 +384,6 @@ int InitMenu()
   if ((ConfigPath = (char*)malloc(sizeof(char) 
     * (strlen(pspGetAppDirectory()) + strlen(ConfigDir) + 2))))
   { sprintf(ConfigPath, "%s%s/", pspGetAppDirectory(), ConfigDir); }
-
-  LoadOptions();
 
   /* Initialize UI components */
   UiMetric.Font = &PspStockFont;
@@ -464,7 +481,7 @@ void DisplayMenu()
       item = pspMenuFindItemById(OptionUiMenu.Menu, OPTION_FRAMESKIP);
       pspMenuSelectOptionByValue(item, (void*)(int)Options.Frameskip);
       item = pspMenuFindItemById(OptionUiMenu.Menu, OPTION_VSYNC);
-      pspMenuSelectOptionByValue(item, (void*)Options.VSync);
+      if (item) pspMenuSelectOptionByValue(item, (void*)Options.VSync);
       item = pspMenuFindItemById(OptionUiMenu.Menu, OPTION_CLOCK_FREQ);
       pspMenuSelectOptionByValue(item, (void*)Options.ClockFreq);
       item = pspMenuFindItemById(OptionUiMenu.Menu, OPTION_SHOW_FPS);
@@ -484,6 +501,10 @@ void DisplayMenu()
       ShowStateTab();
       break;
     case TAB_SYSTEM:
+      item = pspMenuFindItemById(SystemUiMenu.Menu, SYSTEM_MODEL);
+      pspMenuSelectOptionByValue(item, (void*)CPC.model);
+      item = pspMenuFindItemById(SystemUiMenu.Menu, SYSTEM_SCREEN);
+      pspMenuSelectOptionByValue(item, (void*)CPC.scr_tube);
       pspUiOpenMenu(&SystemUiMenu, NULL);
       break;
     case TAB_ABOUT:
@@ -611,10 +632,32 @@ int OnGenericButtonPress(const PspUiFileBrowser *browser, const char *path,
 int OnQuickloadOk(const void *browser, const void *path)
 {
   /* Load game */
-  if (dsk_load((char*)path, &driveA, 'A'))
+  if (pspFileEndsWith((char*)path, "DSK"))
   {
-    pspUiAlert("Error loading disk image");
-    return 0;
+    if (dsk_load((char*)path, &driveA, 'A'))
+    {
+      pspUiAlert("Error loading disk image");
+      return 0;
+    }
+    tape_eject();
+  }
+  else if (pspFileEndsWith((char*)path, "CDT"))
+  {
+    if (tape_insert((char*)path))
+    {
+      pspUiAlert("Error loading tape image");
+      return 0;
+    }
+    dsk_eject(&driveA);
+  }
+  else if (pspFileEndsWith((char*)path, "VOC"))
+  {
+    if (tape_insert_voc((char*)path))
+    {
+      pspUiAlert("Error loading audio tape image");
+      return 0;
+    }
+    dsk_eject(&driveA);
   }
 
   /* Reset loaded game */
@@ -629,7 +672,7 @@ int OnQuickloadOk(const void *browser, const void *path)
   LoadGameConfig(LoadedGame, &ActiveGameConfig);
 
   ResumeEmulation = 1;
-  // TODO: Coldstart();
+  emulator_reset(false);
 
   return 1;
 }
@@ -645,6 +688,21 @@ int OnMenuItemChanged(const struct PspUiMenu *uimenu, PspMenuItem* item,
   {
     switch(item->ID)
     {
+    case SYSTEM_MODEL:
+      if ((unsigned int)option->Value != CPC.model 
+           && pspUiConfirm("This will reset the system. Proceed?"))
+      {
+        CPC.model = (int)option->Value;
+        emulator_reset(false);
+      }
+      break;
+    case SYSTEM_SCREEN:
+      if ((unsigned int)option->Value != CPC.scr_tube)
+      {
+        CPC.scr_tube = (unsigned int)option->Value;
+        video_set_palette();
+      }
+      break;
     case OPTION_DISPLAY_MODE:
       Options.DisplayMode = (int)option->Value;
       break;
@@ -899,7 +957,9 @@ void LoadOptions()
   Options.ShowFps   = pspInitGetInt(init, "Video", "Show FPS", 0);
   Options.ControlMode = pspInitGetInt(init, "Menu", "Control Mode", 0);
   UiMetric.Animate = pspInitGetInt(init, "Menu",  "Animations", 1);
-
+  
+  CPC.model = pspInitGetInt(init, "System", "Model", 2);
+  CPC.scr_tube = pspInitGetInt(init, "System", "Colour", 1);
   if (GamePath) free(GamePath);
   GamePath = pspInitGetString(init, "File", "Game Path", NULL);
 
@@ -927,6 +987,9 @@ int SaveOptions()
   pspInitSetInt(init, "Video", "Show FPS", Options.ShowFps);
   pspInitSetInt(init, "Menu",  "Control Mode", Options.ControlMode);
   pspInitSetInt(init, "Menu",  "Animations", UiMetric.Animate);
+
+  pspInitSetInt(init, "System", "Model", CPC.model);
+  pspInitSetInt(init, "System", "Colour", CPC.scr_tube);
 
   if (GamePath) pspInitSetString(init, "File", "Game Path", GamePath);
 
