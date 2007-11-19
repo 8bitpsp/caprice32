@@ -66,7 +66,7 @@ FILE*foo; /* TODO */
 int InitEmulation()
 {
   if (!(Screen = pspImageCreateVram(512, CPC_VISIBLE_SCR_HEIGHT, 
-    PSP_IMAGE_16BPP))) 
+    PSP_IMAGE_INDEXED))) 
       return 0;
 
   Screen->Viewport.Width = CPC_VISIBLE_SCR_WIDTH;

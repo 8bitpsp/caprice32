@@ -233,7 +233,7 @@ void pspVideoPutImage(const PspImage *image, int dx, int dy, int dw, int dh)
     if (image->Depth == PSP_IMAGE_INDEXED)
     {
       sceGuClutMode(PixelFormat, 0, 0xff, 0);
-      sceGuClutLoad(256 >> 3, image->Palette);
+      sceGuClutLoad(image->PalSize >> 3, image->Palette);
     }
 
     sceGuTexMode(image->TextureFormat, 0, 0, GU_FALSE);

@@ -59,6 +59,7 @@ PspImage* pspImageCreate(int width, int height, int bpp)
   image->FreeBuffer = 1;
   image->Depth = bpp;
   memset(image->Palette, 0, sizeof(image->Palette));
+  image->PalSize = (unsigned short)256;
 
   switch (image->Depth)
   {
@@ -103,6 +104,7 @@ PspImage* pspImageCreateVram(int width, int height, int bpp)
   image->FreeBuffer = 0;
   image->Depth = bpp;
   memset(image->Palette, 0, sizeof(image->Palette));
+  image->PalSize = (unsigned short)256;
 
   switch (image->Depth)
   {
@@ -195,7 +197,10 @@ PspImage* pspImageRotate(const PspImage *orig, int angle_cw)
   }
 
   if (orig->Depth == PSP_IMAGE_INDEXED)
+  {
     memcpy(final->Palette, orig->Palette, sizeof(orig->Palette));
+    final->PalSize = orig->PalSize;
+  }
 
   return final;
 }
@@ -223,7 +228,10 @@ PspImage* pspImageCreateThumbnail(const PspImage *image)
           = ((unsigned short*)image->Pixels)[(image->Width * i) + j];
 
   if (image->Depth == PSP_IMAGE_INDEXED)
+  {
     memcpy(thumb->Palette, image->Palette, sizeof(image->Palette));
+    thumb->PalSize = image->PalSize;
+  }
 
   return thumb;
 }
@@ -300,6 +308,7 @@ PspImage* pspImageCreateCopy(const PspImage *image)
   memcpy(copy->Pixels, image->Pixels, size);
   memcpy(&copy->Viewport, &image->Viewport, sizeof(PspViewport));
   memcpy(copy->Palette, image->Palette, sizeof(image->Palette));
+  copy->PalSize = image->PalSize;
 
   return copy;
 }

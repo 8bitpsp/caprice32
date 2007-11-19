@@ -2370,37 +2370,49 @@ void video_init_tables (void)
 int video_set_palette (void)
 {
   int n;
-  if (!CPC.scr_tube) {
-    for (n = 0; n < 32; n++) {
-      dword red = (dword)(colours_rgb[n][0] * (CPC.scr_intensity / 10.0) * 31);
-      if (red > 31) { // limit to the maximum
-        red = 31;
-      }
-      dword green = (dword)(colours_rgb[n][1] * (CPC.scr_intensity / 10.0) * 31);
-      if (green > 31) {
-        green = 31;
-      }
-      dword blue = (dword)(colours_rgb[n][2] * (CPC.scr_intensity / 10.0) * 31);
-      if (blue > 31) {
-        blue = 31;
-      }
-      dword colour = (blue << 10) | (green << 5) | red | 0x8000;
-      colour_table[n] = colour | (colour << 16);
+  
+  /* Initialize colour table */
+  if (!CPC.scr_tube)
+  {
+    for (n = 0; n < 32; n++) 
+    {
+      dword r = (dword)(colours_rgb[n][0] * (CPC.scr_intensity / 10.0) * 255);
+      if (r > 255) r = 255;
+      dword g = (dword)(colours_rgb[n][1] * (CPC.scr_intensity / 10.0) * 255);
+      if (g > 255) g = 255;
+      dword b = (dword)(colours_rgb[n][2] * (CPC.scr_intensity / 10.0) * 255);
+      if (b > 255) b = 255;
+      dword colour = RGB(r, g, b);
+      colour_table[n] = colour | colour << 16;
     }
-  } else {
-    for (n = 0; n < 32; n++) {
-      dword green = (dword)(colours_green[n] * (CPC.scr_intensity / 10.0) * 31);
-      if (green > 31) {
-        green = 31;
-      }
-      dword colour = green << 5 | 0x8000;
-      colour_table[n] = colour | (colour << 16);
+  }
+  else 
+  {
+    for (n = 0; n < 32; n++) 
+    {
+      dword g = (dword)(colours_green[n] * (CPC.scr_intensity / 10.0) * 255);
+      if (g > 255) g = 255;
+      dword colour = RGB(0, g, 0);
+      colour_table[n] = colour | colour << 16;
     }
+  }
+  
+  switch(CPC.scr_bpp)
+  {
+  case 16:
+    break;
+  case 8:
+    for (n = 0; n < 32; n++)
+    {
+      Screen->Palette[n] = colour_table[n];
+      colour_table[n] =  n | (n << 8) | (n << 16) | (n << 24);
+    }
+    Screen->PalSize = 32;
+    break;
   }
 
-  for (n = 0; n < 17; n++) { // loop for all colours + border
+  for (n = 0; n < 17; n++) // loop for all colours + border
     GateArray.palette[n] = colour_table[GateArray.ink_values[n]];
-  }
 
   return 1;
 }
@@ -2418,11 +2430,23 @@ int video_init (void)
   CPC.scr_base = (dword *)Screen->Pixels;
 
   /* video_set_style */
-  mode_handler[0] = draw16bpp_mode0_half;
-  mode_handler[1] = draw16bpp_mode1_half;
-  mode_handler[2] = draw16bpp_mode2_half;
-  mode_handler[3] = draw16bpp_mode0_half;
-  border_handler = draw16bpp_border_half;
+  switch(CPC.scr_bpp)
+  {
+  case 16:
+    mode_handler[0] = draw16bpp_mode0_half;
+    mode_handler[1] = draw16bpp_mode1_half;
+    mode_handler[2] = draw16bpp_mode2_half;
+    mode_handler[3] = draw16bpp_mode0_half;
+    border_handler = draw16bpp_border_half;
+    break;
+  case 8:
+    mode_handler[0] = draw8bpp_mode0_half;
+    mode_handler[1] = draw8bpp_mode1_half;
+    mode_handler[2] = draw8bpp_mode2_half;
+    mode_handler[3] = draw8bpp_mode0_half;
+    border_handler = draw8bpp_border_half;
+    break;
+  }
 
   GateArray.scr_mode =
       GateArray.requested_scr_mode = (void(*)(dword))mode_handler[GateArray.ROM_config & 3];

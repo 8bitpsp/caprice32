@@ -43,6 +43,7 @@ typedef struct
   unsigned int TextureFormat;
   /* TODO: don't allocate if not necessary */
   unsigned short __attribute__((aligned(16))) Palette[256];
+  unsigned short PalSize;
 } PspImage;
 
 /* Create/destroy */
