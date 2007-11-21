@@ -26,10 +26,11 @@
 #define TAB_ABOUT     5
 #define TAB_MAX       TAB_SYSTEM
 
-#define SYSTEM_SCRNSHOT     0x11
-#define SYSTEM_RESET        0x12
-#define SYSTEM_MODEL        0x13
-#define SYSTEM_SCREEN       0x14
+#define SYSTEM_SCRNSHOT 0x11
+#define SYSTEM_RESET    0x12
+#define SYSTEM_MODEL    0x13
+#define SYSTEM_SCREEN   0x14
+#define SYSTEM_RAM      0x15
 
 #define OPTION_DISPLAY_MODE 0x21
 #define OPTION_FRAMESKIP    0x22
@@ -131,6 +132,14 @@ static const PspMenuOptionDef
     MENU_OPTION(RES_S_SCR_COLOUR,  0),
     MENU_END_OPTIONS
   },
+  RAMOptions[] = {
+    MENU_OPTION("64 kB",  64),
+    MENU_OPTION("128 kB", 128),
+    MENU_OPTION("192 kB", 192),
+    MENU_OPTION("512 kB", 512),
+    MENU_OPTION("576 kB", 576),
+    MENU_END_OPTIONS
+  },
   ButtonMapOptions[] = {
     /* Unmapped */
     MENU_OPTION(RES_S_NONE, 0),
@@ -227,7 +236,7 @@ static const PspMenuItemDef
     MENU_ITEM(RES_S_SCREEN_SIZE,OPTION_DISPLAY_MODE,ScreenSizeOptions,-1,RES_S_CHANGE_SCREEN_SIZE),
     MENU_HEADER(RES_S_PERF),
     MENU_ITEM(RES_S_FRAME_LIMITER,OPTION_FRAME_LIMIT,FrameLimitOptions,-1,RES_S_CHANGE_SCR_UPD_FREQ),
-    MENU_ITEM(RES_S_FRAME_SKIPPING,OPTION_FRAMESKIP,FrameSkipOptions,-1,RES_S_CHANGE_FRAME_SKIP_PER_UPD),
+//    MENU_ITEM(RES_S_FRAME_SKIPPING,OPTION_FRAMESKIP,FrameSkipOptions,-1,RES_S_CHANGE_FRAME_SKIP_PER_UPD),
 //    MENU_ITEM(RES_S_VSYNC,OPTION_VSYNC,ToggleOptions,-1,RES_S_ENABLE_TO_REDUCE_TEARING),
     MENU_ITEM(RES_S_PSP_CLOCK_FREQ,OPTION_CLOCK_FREQ,PspClockFreqOptions,-1,RES_S_LARGER_FASTER_DEPL),
     MENU_ITEM(RES_S_SHOW_FPS,OPTION_SHOW_FPS,ToggleOptions,-1,RES_S_SHOW_HIDE_FPS),
@@ -241,6 +250,7 @@ static const PspMenuItemDef
     MENU_ITEM(RES_S_SCREEN, SYSTEM_SCREEN, ScreenOptions, -1, RES_S_SCREEN_HELP),
     MENU_HEADER(RES_S_SYSTEM),
     MENU_ITEM(RES_S_MODEL, SYSTEM_MODEL, ModelOptions, -1, RES_S_MODEL_HELP),
+    MENU_ITEM(RES_S_RAM, SYSTEM_RAM, RAMOptions, -1, RES_S_RAM_HELP),
     MENU_HEADER(RES_S_OPTIONS),
     MENU_ITEM(RES_S_RESET, SYSTEM_RESET, NULL, -1, RES_S_RESET_HELP),
     MENU_ITEM(RES_S_SAVE_SCR,  SYSTEM_SCRNSHOT, NULL, -1, RES_S_SAVE_SCR_HELP),
@@ -409,12 +419,12 @@ int InitMenu()
   UiMetric.MenuItemMargin = 20;
   UiMetric.MenuSelOptionBg = PSP_COLOR_BLACK;
   UiMetric.MenuOptionBoxColor = PSP_COLOR_GRAY;
-  UiMetric.MenuOptionBoxBg = COLOR(0, 0, 33, 0xBB);
+  UiMetric.MenuOptionBoxBg = COLOR(0, 0, 0, 0xBB);
   UiMetric.MenuDecorColor = PSP_COLOR_YELLOW;
   UiMetric.TitlePadding = 4;
   UiMetric.TitleColor = PSP_COLOR_WHITE;
   UiMetric.MenuFps = 30;
-  UiMetric.TabBgColor = COLOR(0xcc,0xdb,0xe3, 0xff);
+  UiMetric.TabBgColor = COLOR(0xf5,0xf5,0xf5, 0xff);
   UiMetric.Animate = 1;
 
   /* Load the background image */
@@ -479,7 +489,7 @@ void DisplayMenu()
       item = pspMenuFindItemById(OptionUiMenu.Menu, OPTION_DISPLAY_MODE);
       pspMenuSelectOptionByValue(item, (void*)Options.DisplayMode);
       item = pspMenuFindItemById(OptionUiMenu.Menu, OPTION_FRAMESKIP);
-      pspMenuSelectOptionByValue(item, (void*)(int)Options.Frameskip);
+      if (item) pspMenuSelectOptionByValue(item, (void*)(int)Options.Frameskip);
       item = pspMenuFindItemById(OptionUiMenu.Menu, OPTION_VSYNC);
       if (item) pspMenuSelectOptionByValue(item, (void*)Options.VSync);
       item = pspMenuFindItemById(OptionUiMenu.Menu, OPTION_CLOCK_FREQ);
@@ -505,6 +515,8 @@ void DisplayMenu()
       pspMenuSelectOptionByValue(item, (void*)CPC.model);
       item = pspMenuFindItemById(SystemUiMenu.Menu, SYSTEM_SCREEN);
       pspMenuSelectOptionByValue(item, (void*)CPC.scr_tube);
+      item = pspMenuFindItemById(SystemUiMenu.Menu, SYSTEM_RAM);
+      pspMenuSelectOptionByValue(item, (void*)CPC.ram_size);
       pspUiOpenMenu(&SystemUiMenu, NULL);
       break;
     case TAB_ABOUT:
@@ -620,8 +632,8 @@ int OnGenericButtonPress(const PspUiFileBrowser *browser, const char *path,
             == (PSP_CTRL_START | PSP_CTRL_SELECT))
   {
     if (pspUtilSaveVramSeq(ScreenshotPath, "ui"))
-      pspUiAlert("Saved successfully");
-    else pspUiAlert("ERROR: Screenshot not saved");
+      pspUiAlert(RES_S_SAVED_SUCC);
+    else pspUiAlert(RES_S_ERROR_NOT_SAVED);
     return 0;
   }
   else return 0;
@@ -636,7 +648,7 @@ int OnQuickloadOk(const void *browser, const void *path)
   {
     if (dsk_load((char*)path, &driveA, 'A'))
     {
-      pspUiAlert("Error loading disk image");
+      pspUiAlert(RES_S_ERROR_BAD_DISK);
       return 0;
     }
     tape_eject();
@@ -645,7 +657,7 @@ int OnQuickloadOk(const void *browser, const void *path)
   {
     if (tape_insert((char*)path))
     {
-      pspUiAlert("Error loading tape image");
+      pspUiAlert(RES_S_ERROR_BAD_TAPE);
       return 0;
     }
     dsk_eject(&driveA);
@@ -654,7 +666,7 @@ int OnQuickloadOk(const void *browser, const void *path)
   {
     if (tape_insert_voc((char*)path))
     {
-      pspUiAlert("Error loading audio tape image");
+      pspUiAlert(RES_S_ERROR_BAD_TAPE);
       return 0;
     }
     dsk_eject(&driveA);
@@ -689,11 +701,21 @@ int OnMenuItemChanged(const struct PspUiMenu *uimenu, PspMenuItem* item,
     switch(item->ID)
     {
     case SYSTEM_MODEL:
-      if ((unsigned int)option->Value != CPC.model 
-           && pspUiConfirm("This will reset the system. Proceed?"))
+      if ((unsigned int)option->Value != CPC.model) 
       {
+        if (!pspUiConfirm(RES_S_RESET_WARNING))
+          return 0;
+        
         CPC.model = (int)option->Value;
-        emulator_reset(false);
+        if ((CPC.model == 2) && (CPC.ram_size < 128)) 
+        {
+          CPC.ram_size = 128;
+          PspMenuItem *ram_size = pspMenuFindItemById(SystemUiMenu.Menu, SYSTEM_RAM);
+          pspMenuSelectOptionByValue(ram_size, (void*)CPC.ram_size);
+          pspUiAlert(RES_S_RAM_RESIZE_WARNING);
+          return 0;
+        }
+        emulator_reset(true);
       }
       break;
     case SYSTEM_SCREEN:
@@ -701,6 +723,25 @@ int OnMenuItemChanged(const struct PspUiMenu *uimenu, PspMenuItem* item,
       {
         CPC.scr_tube = (unsigned int)option->Value;
         video_set_palette();
+      }
+      break;
+    case SYSTEM_RAM:
+      if ((unsigned int)option->Value != CPC.ram_size) 
+      {
+        if (!pspUiConfirm(RES_S_RESET_WARNING))
+          return 0;
+        
+        /* Check for size validity */
+        CPC.ram_size = (unsigned int)option->Value;
+        if ((CPC.model == 2) && (CPC.ram_size < 128)) CPC.ram_size = 128;
+        
+        if ((unsigned int)option->Value != CPC.ram_size)
+        {
+          pspMenuSelectOptionByValue(item, (void*)CPC.ram_size);
+          pspUiAlert(RES_S_RAM_RESIZE_WARNING);
+          return 0;
+        }
+        emulator_reset(true);
       }
       break;
     case OPTION_DISPLAY_MODE:
@@ -746,8 +787,8 @@ int OnMenuOk(const void *uimenu, const void* sel_item)
         ? pspFileGetFilename(LoadedGame) : EmptyCartName;
 
     if (SaveGameConfig(config_name, &ActiveGameConfig)) 
-      pspUiAlert("Layout saved successfully");
-    else pspUiAlert("ERROR: Changes not saved");
+      pspUiAlert(RES_S_SAVED_SUCC);
+    else pspUiAlert(RES_S_ERROR_NOT_SAVED);
   }
   else
   {
@@ -781,12 +822,12 @@ int OnMenuButtonPress(const struct PspUiMenu *uimenu, PspMenuItem* sel_item,
     {
       /* Save to MS as default mapping */
       if (!SaveGameConfig(DefaultConfigFile, &ActiveGameConfig))
-        pspUiAlert("ERROR: Changes not saved");
+        pspUiAlert(RES_S_ERROR_NOT_SAVED);
       else
       {
         /* Modify in-memory defaults */
         memcpy(&DefaultConfig, &ActiveGameConfig, sizeof(GameConfig));
-        pspUiAlert("Layout saved as default");
+        pspUiAlert(RES_S_SAVED_AS_DEFAULT);
       }
 
       return 0;
@@ -819,7 +860,7 @@ int OnSaveStateOk(const void *gallery, const void *item)
   sprintf(path, "%s%s.s%02i", SaveStatePath, config_name,
           ((const PspMenuItem*)item)->ID);
 
-  if (pspFileCheckIfExists(path) && pspUiConfirm("Load state?"))
+  if (pspFileCheckIfExists(path) && pspUiConfirm(RES_S_LOAD_STATE))
   {
     if (LoadState(path))
     {
@@ -830,7 +871,7 @@ int OnSaveStateOk(const void *gallery, const void *item)
 
       return 1;
     }
-    pspUiAlert("ERROR: State failed to load");
+    pspUiAlert(RES_S_ERROR_LOADING_STATE);
   }
 
   free(path);
@@ -856,14 +897,14 @@ int OnSaveStateButtonPress(const PspUiGallery *gallery, PspMenuItem *sel,
       if (button_mask & PSP_CTRL_SQUARE)
       {
         if (pspFileCheckIfExists(path) 
-            && !pspUiConfirm("Overwrite existing state?")) break;
+            && !pspUiConfirm(RES_S_OVERWRITE_STATE)) break;
 
-        pspUiFlashMessage("Saving, please wait ...");
+        pspUiFlashMessage(RES_S_SAVING_WAIT);
 
         PspImage *icon;
         if (!(icon = SaveState(path, Screen)))
         {
-          pspUiAlert("ERROR: State not saved");
+          pspUiAlert(RES_S_ERROR_NOT_SAVED);
           break;
         }
 
@@ -890,12 +931,12 @@ int OnSaveStateButtonPress(const PspUiGallery *gallery, PspMenuItem *sel,
       }
       else if (button_mask & PSP_CTRL_TRIANGLE)
       {
-        if (!pspFileCheckIfExists(path) || !pspUiConfirm("Delete state?"))
+        if (!pspFileCheckIfExists(path) || !pspUiConfirm(RES_S_DELETE_STATE))
           break;
 
         if (!pspFileDelete(path))
         {
-          pspUiAlert("ERROR: State not deleted");
+          pspUiAlert(RES_S_ERROR_STATE_NOT_DEL);
           break;
         }
 
@@ -906,7 +947,7 @@ int OnSaveStateButtonPress(const PspUiGallery *gallery, PspMenuItem *sel,
         /* Update icon, caption */
         item->Icon = NoSaveIcon;
         pspMenuSetHelpText(item, EmptySlotText);
-        pspMenuSetCaption(item, "Empty");
+        pspMenuSetCaption(item, RES_S_EMPTY);
       }
     } while (0);
 
@@ -953,13 +994,19 @@ void LoadOptions()
   Options.Frameskip = pspInitGetInt(init, "Video", "Frameskip", 0);
   Options.VSync     = pspInitGetInt(init, "Video", "VSync", 0);
   Options.LimitSpeed = pspInitGetInt(init, "Video", "Speed Limiter", 50);
-  Options.ClockFreq = pspInitGetInt(init, "Video", "PSP Clock Frequency", 222);
+  Options.ClockFreq = pspInitGetInt(init, "Video", "PSP Clock Frequency", 266);
   Options.ShowFps   = pspInitGetInt(init, "Video", "Show FPS", 0);
   Options.ControlMode = pspInitGetInt(init, "Menu", "Control Mode", 0);
   UiMetric.Animate = pspInitGetInt(init, "Menu",  "Animations", 1);
   
   CPC.model = pspInitGetInt(init, "System", "Model", 2);
   CPC.scr_tube = pspInitGetInt(init, "System", "Colour", 1);
+  CPC.ram_size = pspInitGetInt(init, "System", "RAM", 128) & 0x02c0;
+  
+  /* Check RAM setting for validity */
+  if (CPC.ram_size > 576) CPC.ram_size = 576;
+  else if ((CPC.model == 2) && (CPC.ram_size < 128)) CPC.ram_size = 128;
+  
   if (GamePath) free(GamePath);
   GamePath = pspInitGetString(init, "File", "Game Path", NULL);
 
@@ -990,6 +1037,7 @@ int SaveOptions()
 
   pspInitSetInt(init, "System", "Model", CPC.model);
   pspInitSetInt(init, "System", "Colour", CPC.scr_tube);
+  pspInitSetInt(init, "System", "RAM", CPC.ram_size);
 
   if (GamePath) pspInitSetString(init, "File", "Game Path", GamePath);
 

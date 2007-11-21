@@ -54,6 +54,7 @@ static int ClearScreen, ShowKybd;
 static u32 TicksPerUpdate, TicksPerSecond;
 static u64 LastTick;
 static int Frame;
+static void *SoundBuffer;
 
 static int  ParseInput();
 static void HandleKeyInput(unsigned int code, int on);
@@ -86,7 +87,7 @@ int InitEmulation()
   CPC.printer = 0;
   CPC.mf2 = 0;
   CPC.keyboard = 0;
-  CPC.joysticks = 1;
+  CPC.joysticks = 0;
 
   CPC.scr_vsync = 0;
   CPC.scr_led = 1;
@@ -99,7 +100,7 @@ int InitEmulation()
   CPC.snd_enabled = 1;
   CPC.snd_playback_rate = 0;
   CPC.snd_bits = 1;
-  CPC.snd_stereo = 0;
+  CPC.snd_stereo = 1;
   CPC.snd_volume = 100;
   CPC.snd_pp_device = 0;
 
@@ -130,6 +131,9 @@ int InitEmulation()
   if (video_init()) return 0;
   if (audio_init()) return 0;
   if (emulator_init()) return 0;
+
+  if (!(SoundBuffer = malloc(CPC.snd_buffersize)))
+    return 0;
 
   memset(&driveA, 0, sizeof(t_drive)); // clear disk drive A data structure
   memset(&driveB, 0, sizeof(t_drive)); // clear disk drive A data structure
@@ -268,10 +272,12 @@ void RunEmulation()
       LastTick = current_tick;
     }
 
-    if (z80_exit == EC_FRAME_COMPLETE)
+    if (z80_exit == EC_SOUND_BUFFER)
+      memcpy(SoundBuffer, pbSndBuffer, CPC.snd_buffersize);
+    else if (z80_exit == EC_FRAME_COMPLETE)
       CPC.scr_base = (dword *)Screen->Pixels;
 
-    z80_exit = z80_execute(); // run the emulation until an exit condition is met
+    z80_exit = z80_execute(); /* run the emulation */
 
     if (z80_exit == EC_FRAME_COMPLETE) RenderVideo();
   }
@@ -284,10 +290,13 @@ void RunEmulation()
 void TrashEmulation()
 {
   /* Destroy canvas */
-  if (Screen) pspImageDestroy(Screen);
+  pspImageDestroy(Screen);
 
   /* Destroy keyboard layout */
-  if (Cpc464Kybd) pspKybdDestroyLayout(Cpc464Kybd);
+  pspKybdDestroyLayout(Cpc464Kybd);
+
+  /* Free local sound buffer */
+  free(SoundBuffer);
 
   printer_stop();
   emulator_shutdown();
@@ -345,5 +354,5 @@ static void RenderVideo()
 
 static void AudioCallback(void* buf, unsigned int *length, void *userdata)
 {
-  memcpy(buf, pbSndBuffer, CPC.snd_buffersize);
+  memcpy(buf, SoundBuffer, CPC.snd_buffersize);
 }

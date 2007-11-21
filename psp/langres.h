@@ -101,10 +101,14 @@
 #define RES_S_DELETE_STATE        "Delete state?"
 #define RES_S_ERROR_STATE_NOT_DEL "ERROR: State not deleted"
 #define RES_S_EMPTY               "Empty"
+#define RES_S_RESET_WARNING       "This will reset the system. Proceed?"
+
+#define RES_S_SAVED_AS_DEFAULT    "Layout set as default"
 
 /* Emulator-specific definitions */
 
 #define RES_S_SCREEN  "Monitor type"
+#define RES_S_RAM     "System RAM"
 
 #define RES_S_SCR_COLOUR  "Colour"
 #define RES_S_SCR_MONOCHR "Monochrome"
@@ -139,3 +143,10 @@
   "\026"PSP_CHAR_RIGHT"\020 Select CPC hardware model"
 #define RES_S_SCREEN_HELP \
   "\026"PSP_CHAR_RIGHT"\020 Select type of emulated monitor"
+#define RES_S_RAM_HELP \
+  "\026"PSP_CHAR_RIGHT"\020 Select amount of system RAM"
+
+#define RES_S_ERROR_BAD_TAPE     "Error loading tape image"
+#define RES_S_ERROR_BAD_DISK     "Error loading disk image"
+#define RES_S_RAM_RESIZE_WARNING \
+  "Amount of system memory has been readjusted to fit the selected system model"
