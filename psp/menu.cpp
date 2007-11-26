@@ -9,6 +9,8 @@
 #include "langres.h"
 #include "emulate.h"
 
+#include "unzip.h"
+
 #include "video.h"
 #include "image.h"
 #include "ui.h"
@@ -31,6 +33,8 @@
 #define SYSTEM_MODEL    0x13
 #define SYSTEM_SCREEN   0x14
 #define SYSTEM_RAM      0x15
+#define SYSTEM_DRIVEA   0x16
+#define SYSTEM_TAPE     0x17
 
 #define OPTION_DISPLAY_MODE 0x21
 #define OPTION_FRAMESKIP    0x22
@@ -40,6 +44,7 @@
 #define OPTION_CONTROL_MODE 0x26
 #define OPTION_FRAME_LIMIT  0x27
 #define OPTION_ANIMATE      0x28
+#define OPTION_AUTOLOAD     0x29
 
 extern struct GameConfig ActiveGameConfig;
 extern PspImage *Screen;
@@ -78,7 +83,9 @@ static const char
   *SaveStateDir = "savedata",
   *ConfigDir = "config",
   *DefaultConfigFile = "default",
-  *QuickloadFilter[] = { "DSK", "CDT", "VOC", '\0' },
+  *QuickloadFilter[] = { "DSK", "CDT", "VOC", "ZIP", '\0' },
+  *DiskFilter[] = { "DSK", "ZIP", '\0' },
+  *TapeFilter[] = { "CDT", "VOC", "ZIP", '\0' },
   PresentSlotText[] = RES_S_PRESENT_SLOT_TEXT,
   EmptySlotText[]   = RES_S_EMPTY_SLOT_TEXT,
   ControlHelpText[] = RES_S_CONTROL_HELP_TEXT;
@@ -132,12 +139,30 @@ static const PspMenuOptionDef
     MENU_OPTION(RES_S_SCR_COLOUR,  0),
     MENU_END_OPTIONS
   },
+  AutoloadOptions[] = {
+    MENU_OPTION(RES_S_DISABLED, -1),
+    MENU_OPTION("1", 0),
+    MENU_OPTION("2", 1),
+    MENU_OPTION("3", 2),
+    MENU_OPTION("4", 3),
+    MENU_OPTION("5", 4),
+    MENU_OPTION("6", 5),
+    MENU_OPTION("7", 6),
+    MENU_OPTION("8", 7),
+    MENU_OPTION("9", 8),
+    MENU_OPTION("10",9),
+    MENU_END_OPTIONS
+  },
   RAMOptions[] = {
     MENU_OPTION("64 kB",  64),
     MENU_OPTION("128 kB", 128),
     MENU_OPTION("192 kB", 192),
     MENU_OPTION("512 kB", 512),
     MENU_OPTION("576 kB", 576),
+    MENU_END_OPTIONS
+  },
+  StorageOptions[] = {
+    MENU_OPTION("Placeholder",  64),
     MENU_END_OPTIONS
   },
   ButtonMapOptions[] = {
@@ -240,6 +265,8 @@ static const PspMenuItemDef
 //    MENU_ITEM(RES_S_VSYNC,OPTION_VSYNC,ToggleOptions,-1,RES_S_ENABLE_TO_REDUCE_TEARING),
     MENU_ITEM(RES_S_PSP_CLOCK_FREQ,OPTION_CLOCK_FREQ,PspClockFreqOptions,-1,RES_S_LARGER_FASTER_DEPL),
     MENU_ITEM(RES_S_SHOW_FPS,OPTION_SHOW_FPS,ToggleOptions,-1,RES_S_SHOW_HIDE_FPS),
+    MENU_HEADER(RES_S_ENHANCEMENTS),
+    MENU_ITEM(RES_S_AUTOLOAD_SLOT,OPTION_AUTOLOAD,AutoloadOptions,-1,RES_S_AUTOLOAD_HELP),
     MENU_HEADER(RES_S_MENU),
     MENU_ITEM(RES_S_UI_MODE,OPTION_CONTROL_MODE,ControlModeOptions,-1,RES_S_CHANGE_OK_CANCEL),
     MENU_ITEM(RES_S_ANIMATIONS,OPTION_ANIMATE,ToggleOptions,-1,RES_S_ENABLE_DISABLE_ANIM),
@@ -248,6 +275,9 @@ static const PspMenuItemDef
   SystemMenuDef[] = {
     MENU_HEADER(RES_S_VIDEO),
     MENU_ITEM(RES_S_SCREEN, SYSTEM_SCREEN, ScreenOptions, -1, RES_S_SCREEN_HELP),
+    MENU_HEADER(RES_S_STORAGE),
+    MENU_ITEM(RES_S_DRIVEA, SYSTEM_DRIVEA, StorageOptions, 0, RES_S_STORAGE_VACANT_HELP),
+    MENU_ITEM(RES_S_TAPE, SYSTEM_TAPE, StorageOptions, 0, RES_S_STORAGE_VACANT_HELP),
     MENU_HEADER(RES_S_SYSTEM),
     MENU_ITEM(RES_S_MODEL, SYSTEM_MODEL, ModelOptions, -1, RES_S_MODEL_HELP),
     MENU_ITEM(RES_S_RAM, SYSTEM_RAM, RAMOptions, -1, RES_S_RAM_HELP),
@@ -265,6 +295,7 @@ RES_S_SYSTEM_TAB, RES_S_ABOUT_TAB };
 static PspImage* LoadStateIcon(const char *path);
 static int LoadState(const char *path);
 static PspImage* SaveState(const char *path, PspImage *icon);
+int LoadResource(const char *path);
 
 static void ShowControlTab();
 static void ShowStateTab();
@@ -289,6 +320,7 @@ static void OnSplashRender(const void *uiobject, const void *null);
 static void OnSystemRender(const void *uiobject, const void *item_obj);
 
 static int OnQuickloadOk(const void *browser, const void *path);
+static int OnFileOk(const void *browser, const void *path);
 
 static int OnMenuItemChanged(const struct PspUiMenu *uimenu, PspMenuItem* item, 
                              const PspMenuOption* option);
@@ -306,6 +338,8 @@ static PspImage *Background;
 static PspImage *NoSaveIcon;
 
 char *LoadedGame;
+static char *DiskPath;
+static char *TapePath;
 static char *GamePath;
 static char *SaveStatePath;
 static char *ConfigPath;
@@ -338,6 +372,16 @@ PspUiFileBrowser QuickloadBrowser =
   OnGenericButtonPress,
   QuickloadFilter,
   0
+};
+
+PspUiFileBrowser FileBrowser = 
+{
+  OnGenericRender,
+  OnFileOk,
+  NULL,
+  NULL,
+  NULL,
+  NULL
 };
 
 PspUiMenu OptionUiMenu =
@@ -378,6 +422,8 @@ int InitMenu()
   NoSaveIcon = NULL;
   LoadedGame = NULL;
   GamePath = NULL;
+  DiskPath = NULL;
+  TapePath = NULL;
 
   LoadOptions();
 
@@ -502,6 +548,8 @@ void DisplayMenu()
       pspMenuSelectOptionByValue(item, (void*)UiMetric.Animate);
       item = pspMenuFindItemById(OptionUiMenu.Menu, OPTION_FRAME_LIMIT);
       pspMenuSelectOptionByValue(item, (void*)Options.LimitSpeed);
+      item = pspMenuFindItemById(OptionUiMenu.Menu, OPTION_AUTOLOAD);
+      pspMenuSelectOptionByValue(item, (void*)Options.AutoloadSlot);
       pspUiOpenMenu(&OptionUiMenu, NULL);
       break;
     case TAB_CONTROL:
@@ -517,6 +565,16 @@ void DisplayMenu()
       pspMenuSelectOptionByValue(item, (void*)CPC.scr_tube);
       item = pspMenuFindItemById(SystemUiMenu.Menu, SYSTEM_RAM);
       pspMenuSelectOptionByValue(item, (void*)CPC.ram_size);
+      item = pspMenuFindItemById(SystemUiMenu.Menu, SYSTEM_DRIVEA);
+      pspMenuModifyOption(item->Options, 
+        (DiskPath) ? pspFileGetFilename(DiskPath) : RES_S_VACANT, NULL);
+      pspMenuSetHelpText(item, (DiskPath) 
+          ? RES_S_STORAGE_TAKEN_HELP : RES_S_STORAGE_VACANT_HELP);
+      item = pspMenuFindItemById(SystemUiMenu.Menu, SYSTEM_TAPE);
+      pspMenuModifyOption(item->Options, 
+        (TapePath) ? pspFileGetFilename(DiskPath) : RES_S_VACANT, NULL);
+      pspMenuSetHelpText(item, (TapePath) 
+          ? RES_S_STORAGE_TAKEN_HELP : RES_S_STORAGE_VACANT_HELP);
       pspUiOpenMenu(&SystemUiMenu, NULL);
       break;
     case TAB_ABOUT:
@@ -595,12 +653,15 @@ void OnGenericRender(const void *uiobject, const void *item_obj)
     /* Determine width of text */
     width = pspFontGetTextWidth(UiMetric.Font, TabLabel[i]);
 
-    /* Draw background of active tab */
-    if (i == TabIndex)
-      pspVideoFillRect(x - 5, 0, x + width + 5, height + 1, UiMetric.TabBgColor);
-
-    /* Draw name of tab */
-    pspVideoPrint(UiMetric.Font, x, 0, TabLabel[i], PSP_COLOR_WHITE);
+    if (i == TabIndex || !(uiobject == &FileBrowser))
+    {
+      /* Draw background of active tab */
+      if (i == TabIndex)
+        pspVideoFillRect(x - 5, 0, x + width + 5, height + 1, UiMetric.TabBgColor);
+  
+      /* Draw name of tab */
+      pspVideoPrint(UiMetric.Font, x, 0, TabLabel[i], PSP_COLOR_WHITE);
+    }
   }
 }
 
@@ -641,43 +702,50 @@ int OnGenericButtonPress(const PspUiFileBrowser *browser, const char *path,
   return 1;
 }
 
-int OnQuickloadOk(const void *browser, const void *path)
+int OnFileOk(const void *browser, const void *path)
 {
-  /* Load game */
-  if (pspFileEndsWith((char*)path, "DSK"))
-  {
-    if (dsk_load((char*)path, &driveA, 'A'))
-    {
-      pspUiAlert(RES_S_ERROR_BAD_DISK);
-      return 0;
-    }
-    tape_eject();
-  }
-  else if (pspFileEndsWith((char*)path, "CDT"))
-  {
-    if (tape_insert((char*)path))
-    {
-      pspUiAlert(RES_S_ERROR_BAD_TAPE);
-      return 0;
-    }
-    dsk_eject(&driveA);
-  }
-  else if (pspFileEndsWith((char*)path, "VOC"))
-  {
-    if (tape_insert_voc((char*)path))
-    {
-      pspUiAlert(RES_S_ERROR_BAD_TAPE);
-      return 0;
-    }
-    dsk_eject(&driveA);
-  }
-
+  if (!LoadResource((char*)path))
+    return 0;
+  
   /* Reset loaded game */
   if (LoadedGame) free(LoadedGame);
   LoadedGame = strdup((char*)path);
 
   /* Reset current game path */
-  if (GamePath) free(GamePath);
+  free(GamePath);
+  GamePath = pspFileGetParentDirectory(LoadedGame);
+
+  /* Load control set */
+  LoadGameConfig(LoadedGame, &ActiveGameConfig);
+
+  /* Reset the menu items */
+  PspMenuItem *item;
+  item = pspMenuFindItemById(SystemUiMenu.Menu, SYSTEM_DRIVEA);
+  pspMenuModifyOption(item->Options, 
+    (DiskPath) ? pspFileGetFilename(DiskPath) : RES_S_VACANT, NULL);
+  pspMenuSetHelpText(item, (DiskPath) 
+      ? RES_S_STORAGE_TAKEN_HELP : RES_S_STORAGE_VACANT_HELP);
+
+  item = pspMenuFindItemById(SystemUiMenu.Menu, SYSTEM_TAPE);
+  pspMenuModifyOption(item->Options, 
+    (TapePath) ? pspFileGetFilename(DiskPath) : RES_S_VACANT, NULL);
+  pspMenuSetHelpText(item, (TapePath) 
+      ? RES_S_STORAGE_TAKEN_HELP : RES_S_STORAGE_VACANT_HELP);
+
+  return 1;
+}
+
+int OnQuickloadOk(const void *browser, const void *path)
+{
+  if (!LoadResource((char*)path))
+    return 0;
+  
+  /* Reset loaded game */
+  if (LoadedGame) free(LoadedGame);
+  LoadedGame = strdup((char*)path);
+
+  /* Reset current game path */
+  free(GamePath);
   GamePath = pspFileGetParentDirectory(LoadedGame);
 
   /* Load control set */
@@ -685,6 +753,21 @@ int OnQuickloadOk(const void *browser, const void *path)
 
   ResumeEmulation = 1;
   emulator_reset(false);
+
+  /* Autoload saved state */
+  if (Options.AutoloadSlot >= 0)
+  {
+    const char *config_name = (LoadedGame) 
+        ? pspFileGetFilename(LoadedGame) : EmptyCartName;
+    char *state_file = (char*)malloc(strlen(SaveStatePath) 
+        + strlen(config_name) + 8);
+    sprintf(state_file, "%s%s.s%02i", SaveStatePath, config_name,
+           Options.AutoloadSlot);
+    
+    /* Attempt loading saved state */
+    LoadState(state_file);
+    free(state_file);
+  }
 
   return 1;
 }
@@ -765,6 +848,9 @@ int OnMenuItemChanged(const struct PspUiMenu *uimenu, PspMenuItem* item,
     case OPTION_ANIMATE:
       UiMetric.Animate = (int)option->Value;
       break;
+    case OPTION_AUTOLOAD:
+      Options.AutoloadSlot = (int)option->Value;
+      break;
     case OPTION_CONTROL_MODE:
       Options.ControlMode = (int)option->Value;
       UiMetric.OkButton = (Options.ControlMode) 
@@ -807,6 +893,14 @@ int OnMenuOk(const void *uimenu, const void* sel_item)
         pspUiAlert(RES_S_SAVED_SUCC);
       else pspUiAlert(RES_S_ERROR_NOT_SAVED);
       break;
+    case SYSTEM_DRIVEA:
+      FileBrowser.Filter = DiskFilter;
+      pspUiOpenBrowser(&FileBrowser, (DiskPath) ? DiskPath : GamePath);
+      break;
+    case SYSTEM_TAPE:
+      FileBrowser.Filter = TapeFilter;
+      pspUiOpenBrowser(&FileBrowser, (TapePath) ? TapePath : GamePath);
+      break;
     }
   }
 
@@ -816,6 +910,8 @@ int OnMenuOk(const void *uimenu, const void* sel_item)
 int OnMenuButtonPress(const struct PspUiMenu *uimenu, PspMenuItem* sel_item, 
                       u32 button_mask)
 {
+  PspMenuItem *item;
+  
   if (uimenu == &ControlUiMenu)
   {
     if (button_mask & PSP_CTRL_SQUARE)
@@ -834,7 +930,6 @@ int OnMenuButtonPress(const struct PspUiMenu *uimenu, PspMenuItem* sel_item,
     }
     else if (button_mask & PSP_CTRL_TRIANGLE)
     {
-      PspMenuItem *item;
       int i;
 
       /* Load default mapping */
@@ -844,6 +939,33 @@ int OnMenuButtonPress(const struct PspUiMenu *uimenu, PspMenuItem* sel_item,
       for (item = ControlUiMenu.Menu->First, i = 0; item; item = item->Next, i++)
         pspMenuSelectOptionByValue(item, (void*)ActiveGameConfig.ButtonMap[i]);
 
+      return 0;
+    }
+  }
+  else
+  {
+    if (button_mask & PSP_CTRL_TRIANGLE)
+    {
+      switch(sel_item->ID)
+      {
+      case SYSTEM_DRIVEA:
+        if (!DiskPath || !pspUiConfirm("Eject disk?")) break;
+        dsk_eject(&driveA);
+        DiskPath = NULL;
+        
+        pspMenuModifyOption(sel_item->Options, RES_S_VACANT, NULL);
+        pspMenuSetHelpText(sel_item, RES_S_STORAGE_VACANT_HELP);
+        break;
+      case SYSTEM_TAPE:
+        if (!TapePath || !pspUiConfirm("Eject tape?")) break;
+        tape_eject();
+        TapePath = NULL;
+        
+        pspMenuModifyOption(sel_item->Options, RES_S_VACANT, NULL);
+        pspMenuSetHelpText(sel_item, RES_S_STORAGE_VACANT_HELP);
+        break;
+      }
+      
       return 0;
     }
   }
@@ -919,7 +1041,7 @@ int OnSaveStateButtonPress(const PspUiGallery *gallery, PspMenuItem *sel,
         pspMenuSetHelpText(item, PresentSlotText);
 
         /* Get file modification time/date */
-        if (sceIoGetstat(path, &stat) < 0) sprintf(caption, "ERROR");
+        if (sceIoGetstat(path, &stat) < 0) sprintf(caption, RES_S_ERROR);
         else sprintf(caption, "%02i/%02i/%02i %02i:%02i", 
                      stat.st_mtime.month,
                      stat.st_mtime.day,
@@ -947,11 +1069,12 @@ int OnSaveStateButtonPress(const PspUiGallery *gallery, PspMenuItem *sel,
         /* Update icon, caption */
         item->Icon = NoSaveIcon;
         pspMenuSetHelpText(item, EmptySlotText);
-        pspMenuSetCaption(item, RES_S_EMPTY);
+        pspMenuSetCaption(item, ((int)item->ID == Options.AutoloadSlot) 
+            ? RES_S_AUTOLOAD : RES_S_EMPTY);
       }
     } while (0);
 
-    if (path) free(path);
+    free(path);
     return 0;
   }
 
@@ -1003,6 +1126,8 @@ void LoadOptions()
   CPC.scr_tube = pspInitGetInt(init, "System", "Colour", 1);
   CPC.ram_size = pspInitGetInt(init, "System", "RAM", 128) & 0x02c0;
   
+  Options.AutoloadSlot = pspInitGetInt(init, "Enhancements", "Autoload", -1);
+
   /* Check RAM setting for validity */
   if (CPC.ram_size > 576) CPC.ram_size = 576;
   else if ((CPC.model == 2) && (CPC.ram_size < 128)) CPC.ram_size = 128;
@@ -1039,6 +1164,8 @@ int SaveOptions()
   pspInitSetInt(init, "System", "Colour", CPC.scr_tube);
   pspInitSetInt(init, "System", "RAM", CPC.ram_size);
 
+  pspInitSetInt(init, "Enhancements", "Autoload", Options.AutoloadSlot);
+  
   if (GamePath) pspInitSetString(init, "File", "Game Path", GamePath);
 
   /* Save INI file */
@@ -1167,7 +1294,8 @@ void ShowStateTab()
     }
     else
     {
-      pspMenuSetCaption(item, RES_S_EMPTY);
+      pspMenuSetCaption(item, ((int)item->ID == Options.AutoloadSlot) 
+          ? RES_S_AUTOLOAD : RES_S_EMPTY);
       item->Icon = NoSaveIcon;
       pspMenuSetHelpText(item, EmptySlotText);
     }
@@ -1258,6 +1386,141 @@ PspImage* SaveState(const char *path, PspImage *icon)
   return thumb;
 }
 
+int LoadResource(const char *path)
+{
+  char selected_file[256] = "\0";
+  const char *filename = path;
+  
+  if (pspFileEndsWith(path, "ZIP"))
+  {
+    unzFile zipfile = NULL;
+    unz_global_info gi;
+    unz_file_info fi;
+
+    /* Open archive for reading */
+    if (!(zipfile = unzOpen(filename)))
+    {
+      pspUiAlert("Error opening compressed file");
+      return 0;
+    }
+
+    /* Get global ZIP file information */
+    if (unzGetGlobalInfo(zipfile, &gi) != UNZ_OK)
+    {
+      pspUiAlert("Error reading compressed file information");
+      unzClose(zipfile);
+      return 0;
+    }
+
+    int min_dsk = 11, dsk, i;
+    char archived_file[256];
+    
+    for (i = 0; i < (int)gi.number_entry; i++)
+    {
+      /* Get name of the archived file */
+      if (unzGetCurrentFileInfo(zipfile, &fi, archived_file, 
+          sizeof(archived_file), NULL, 0, NULL, 0) != UNZ_OK)
+      {
+        pspUiAlert("Error reading compressed file information");
+        unzClose(zipfile);
+        return 0;
+      }
+
+      if (pspFileEndsWith(archived_file, "CDT")
+          || pspFileEndsWith(archived_file, "VOC"))
+      {
+        strcpy(selected_file, archived_file);
+        break;
+      }
+      else if (pspFileEndsWith(archived_file, "DSK"))
+      {
+        /* Check the pre-extension char */
+        char digit = archived_file[strlen(archived_file) - 5];
+
+        if (digit >= '0' && digit <= '9')
+        {
+          /* Find the file with the lowest sequential number */
+          /* Treat zero as #10 */
+          dsk = (digit == 0) ? 10 : (int)digit - '0';
+
+          if (dsk < min_dsk)
+          {
+            min_dsk = dsk;
+            strcpy(selected_file, archived_file);
+          }
+        }
+        else
+        {
+          /* Non-sequential DSK - load it immediately */
+          strcpy(selected_file, archived_file);
+          break;
+        }
+      }
+
+      /* Go to the next file in the archive */
+      if (i + 1 < (int)gi.number_entry)
+      {
+        if (unzGoToNextFile(zipfile) != UNZ_OK)
+        {
+          pspUiAlert("Error parsing compressed files");
+          unzClose(zipfile);
+          return 0;
+        }
+      }
+    }
+    
+    filename = selected_file;
+    unzClose(zipfile);
+  }
+  
+  /* Load game */
+  if (pspFileEndsWith(filename, "DSK"))
+  {
+    if (dsk_load((char*)path, *selected_file ? selected_file : NULL, 
+        &driveA, 'A'))
+    {
+      pspUiAlert(RES_S_ERROR_BAD_DISK);
+      return 0;
+    }
+    
+    free(TapePath);
+    free(DiskPath);
+    DiskPath = strdup(path);
+    
+    tape_eject();
+  }
+  else if (pspFileEndsWith(filename, "CDT"))
+  {
+    if (tape_insert((char*)path))
+    {
+      pspUiAlert(RES_S_ERROR_BAD_TAPE);
+      return 0;
+    }
+    
+    free(TapePath);
+    free(DiskPath);
+    TapePath = strdup(path);
+    
+    dsk_eject(&driveA);
+  }
+  else if (pspFileEndsWith(filename, "VOC"))
+  {
+    if (tape_insert_voc((char*)path))
+    {
+      pspUiAlert(RES_S_ERROR_BAD_TAPE);
+      return 0;
+    }
+    
+    free(TapePath);
+    free(DiskPath);
+    TapePath = strdup(path);
+    
+    dsk_eject(&driveA);
+  }
+
+  return 1;
+}
+
 void TrashMenu()
 {
   /* Save options */
@@ -1267,13 +1530,16 @@ void TrashMenu()
   TrashEmulation();
 
   /* Free local resources */
-  if (Background) pspImageDestroy(Background);
-  if (NoSaveIcon) pspImageDestroy(NoSaveIcon);
-  if (LoadedGame) free(LoadedGame);
-  if (GamePath) free(GamePath);
-  if (SaveStatePath) free(SaveStatePath);
-  if (ScreenshotPath) free(ScreenshotPath);
-  if (ConfigPath) free(ConfigPath);
+  pspImageDestroy(Background);
+  pspImageDestroy(NoSaveIcon);
+  
+  free(LoadedGame);
+  free(DiskPath);
+  free(TapePath);
+  free(GamePath);
+  free(SaveStatePath);
+  free(ScreenshotPath);
+  free(ConfigPath);
 
   /* Destroy menu objects */
   pspMenuDestroy(SaveStateGallery.Menu);

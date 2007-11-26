@@ -61,6 +61,7 @@ typedef struct
   int VSync;
   int LimitSpeed;
   int Frameskip;
+  int AutoloadSlot;
 } EmulatorOptions;
 
 #endif // _MENU_H

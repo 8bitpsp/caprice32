@@ -45,6 +45,7 @@
 #define RES_S_SYSTEM "System"
 #define RES_S_VIDEO  "Video"
 #define RES_S_PERF   "Performance"
+#define RES_S_STORAGE "Storage"
 #define RES_S_MENU   "Menu"
 #define RES_S_ERROR  "ERROR"
 #define RES_S_SOUND  "Sound"
@@ -145,8 +146,23 @@
   "\026"PSP_CHAR_RIGHT"\020 Select type of emulated monitor"
 #define RES_S_RAM_HELP \
   "\026"PSP_CHAR_RIGHT"\020 Select amount of system RAM"
+#define RES_S_AUTOLOAD_HELP \
+  "\026"PSP_CHAR_RIGHT"\020 Select save state to be loaded automatically"
 
 #define RES_S_ERROR_BAD_TAPE     "Error loading tape image"
 #define RES_S_ERROR_BAD_DISK     "Error loading disk image"
 #define RES_S_RAM_RESIZE_WARNING \
   "Amount of system memory has been readjusted to fit the selected system model"
+
+#define RES_S_AUTOLOAD "Autoload"
+#define RES_S_ENHANCEMENTS "Enhancements"
+#define RES_S_AUTOLOAD_SLOT "Autoload slot"
+
+#define RES_S_DRIVEA  "Drive A"
+#define RES_S_TAPE    "Tape drive"
+#define RES_S_VACANT  "Vacant"
+
+#define RES_S_STORAGE_TAKEN_HELP \
+  "\026"PSP_CHAR_SQUARE"\020 Save\t\026\001\020 Browse\t\026"PSP_CHAR_TRIANGLE"\020 Eject"
+#define RES_S_STORAGE_VACANT_HELP \
+  "\026\001\020 Browse"

@@ -9,6 +9,8 @@
 #include "4.1.0/crtc.h"
 #include "tape.h"
 
+#include "unzip.h"
+
 #include "video.h"
 #include "image.h"
 
@@ -1788,6 +1790,190 @@ void dsk_eject (t_drive *drive)
    drive->current_track = dwTemp;
 }
 
+int dsk_load(char *pchFileName, char *archive_filename, t_drive *drive, char chID)
+{
+  int iRetCode;
+  dword dwTrackSize, track, side, sector, dwSectorSize, dwSectors;
+  byte *pbPtr, *pbDataPtr, *pbTempPtr, *pbTrackSizeTable;
+
+  iRetCode = 0;
+  dsk_eject(drive);
+
+  unzFile zipfile = NULL;
+  pfileObject = NULL;
+
+  /* Open ZIP file */
+  if (archive_filename)
+  {
+    if(!(zipfile = unzOpen(pchFileName)))
+    { 
+      dsk_eject(drive);
+      return ERR_FILE_NOT_FOUND;
+    }
+
+    /* Locate the requested file in the ZIP archive */
+    if (unzLocateFile(zipfile, archive_filename, 0) != UNZ_OK
+        || unzOpenCurrentFile(zipfile) != UNZ_OK)
+    {
+      unzClose(zipfile);
+      return ERR_FILE_NOT_FOUND;
+    }
+  }
+  else
+  {
+    if (!(pfileObject = fopen(pchFileName, "rb")))
+      return ERR_FILE_NOT_FOUND;
+  }
+  
+  /* read DSK header */
+  if (zipfile) unzReadCurrentFile(zipfile, pbGPBuffer, 0x100);
+  else fread(pbGPBuffer, 0x100, 1, pfileObject); // read DSK header
+  pbPtr = pbGPBuffer;
+
+  if (memcmp(pbPtr, "MV - CPC", 8) == 0) { // normal DSK image?
+    drive->tracks = *(pbPtr + 0x30); // grab number of tracks
+    if (drive->tracks > DSK_TRACKMAX) { // compare against upper limit
+      drive->tracks = DSK_TRACKMAX; // limit to maximum
+    }
+    drive->sides = *(pbPtr + 0x31); // grab number of sides
+    if (drive->sides > DSK_SIDEMAX) { // abort if more than maximum
+      iRetCode = ERR_DSK_SIDES;
+      goto exit;
+    }
+    dwTrackSize = (*(pbPtr + 0x32) + (*(pbPtr + 0x33) << 8)) - 0x100; // determine track size in bytes, minus track header
+    drive->sides--; // zero base number of sides
+    for (track = 0; track < drive->tracks; track++) { // loop for all tracks
+      for (side = 0; side <= drive->sides; side++) { // loop for all sides
+        /* read track header */
+        if (zipfile) unzReadCurrentFile(zipfile, pbGPBuffer+0x100, 0x100);
+        else fread(pbGPBuffer+0x100, 0x100, 1, pfileObject);
+        pbPtr = pbGPBuffer + 0x100;
+        if (memcmp(pbPtr, "Track-Info", 10) != 0) { // abort if ID does not match
+          iRetCode = ERR_DSK_INVALID;
+          goto exit;
+        }
+        dwSectorSize = 0x80 << *(pbPtr + 0x14); // determine sector size in bytes
+        dwSectors = *(pbPtr + 0x15); // grab number of sectors
+        if (dwSectors > DSK_SECTORMAX) { // abort if sector count greater than maximum
+          iRetCode = ERR_DSK_SECTORS;
+          goto exit;
+        }
+        drive->track[track][side].sectors = dwSectors; // store sector count
+        drive->track[track][side].size = dwTrackSize; // store track size
+        drive->track[track][side].data = (byte *)malloc(dwTrackSize); // attempt to allocate the required memory
+        if (drive->track[track][side].data == NULL) { // abort if not enough
+          iRetCode = ERR_OUT_OF_MEMORY;
+          goto exit;
+        }
+        pbDataPtr = drive->track[track][side].data; // pointer to start of memory buffer
+        pbTempPtr = pbDataPtr; // keep a pointer to the beginning of the buffer for the current track
+        for (sector = 0; sector < dwSectors; sector++) { // loop for all sectors
+          memcpy(drive->track[track][side].sector[sector].CHRN, (pbPtr + 0x18), 4); // copy CHRN
+          memcpy(drive->track[track][side].sector[sector].flags, (pbPtr + 0x1c), 2); // copy ST1 & ST2
+          drive->track[track][side].sector[sector].size = dwSectorSize;
+          drive->track[track][side].sector[sector].data = pbDataPtr; // store pointer to sector data
+          pbDataPtr += dwSectorSize;
+          pbPtr += 8;
+        }
+        int nread;
+        /* read entire track data in one go */
+        if (zipfile) nread = unzReadCurrentFile(zipfile, pbTempPtr, dwTrackSize);
+        else nread = fread(pbTempPtr, dwTrackSize, 1, pfileObject);
+        if (!nread) { 
+          iRetCode = ERR_DSK_INVALID;
+          goto exit;
+        }
+      }
+    }
+    drive->altered = 0; // disk is as yet unmodified
+  } else {
+    if (memcmp(pbPtr, "EXTENDED", 8) == 0) { // extended DSK image?
+      drive->tracks = *(pbPtr + 0x30); // number of tracks
+      if (drive->tracks > DSK_TRACKMAX) {  // limit to maximum possible
+        drive->tracks = DSK_TRACKMAX;
+      }
+      drive->random_DEs = *(pbPtr + 0x31) & 0x80; // simulate random Data Errors?
+      drive->sides = *(pbPtr + 0x31) & 3; // number of sides
+      if (drive->sides > DSK_SIDEMAX) { // abort if more than maximum
+        iRetCode = ERR_DSK_SIDES;
+        goto exit;
+      }
+      pbTrackSizeTable = pbPtr + 0x34; // pointer to track size table in DSK header
+      drive->sides--; // zero base number of sides
+      for (track = 0; track < drive->tracks; track++) { // loop for all tracks
+        for (side = 0; side <= drive->sides; side++) { // loop for all sides
+          dwTrackSize = (*pbTrackSizeTable++ << 8); // track size in bytes
+          if (dwTrackSize != 0) { // only process if track contains data
+            dwTrackSize -= 0x100; // compensate for track header
+            /* read track header */
+            if (zipfile) unzReadCurrentFile(zipfile, pbGPBuffer+0x100, 0x100);
+            else fread(pbGPBuffer+0x100, 0x100, 1, pfileObject);
+            pbPtr = pbGPBuffer + 0x100;
+            if (memcmp(pbPtr, "Track-Info", 10) != 0) { // valid track header?
+              iRetCode = ERR_DSK_INVALID;
+              goto exit;
+            }
+            dwSectors = *(pbPtr + 0x15); // number of sectors for this track
+            if (dwSectors > DSK_SECTORMAX) { // abort if sector count greater than maximum
+              iRetCode = ERR_DSK_SECTORS;
+              goto exit;
+            }
+            drive->track[track][side].sectors = dwSectors; // store sector count
+            drive->track[track][side].size = dwTrackSize; // store track size
+            drive->track[track][side].data = (byte *)malloc(dwTrackSize); // attempt to allocate the required memory
+            if (drive->track[track][side].data == NULL) { // abort if not enough
+              iRetCode = ERR_OUT_OF_MEMORY;
+              goto exit;
+            }
+            pbDataPtr = drive->track[track][side].data; // pointer to start of memory buffer
+            pbTempPtr = pbDataPtr; // keep a pointer to the beginning of the buffer for the current track
+            for (sector = 0; sector < dwSectors; sector++) { // loop for all sectors
+              memcpy(drive->track[track][side].sector[sector].CHRN, (pbPtr + 0x18), 4); // copy CHRN
+              memcpy(drive->track[track][side].sector[sector].flags, (pbPtr + 0x1c), 2); // copy ST1 & ST2
+              dwSectorSize = *(pbPtr + 0x1e) + (*(pbPtr + 0x1f) << 8); // sector size in bytes
+              drive->track[track][side].sector[sector].size = dwSectorSize;
+              drive->track[track][side].sector[sector].data = pbDataPtr; // store pointer to sector data
+              pbDataPtr += dwSectorSize;
+              pbPtr += 8;
+            }
+            int nread;
+            /* read entire track data in one go */
+            if (zipfile) nread = unzReadCurrentFile(zipfile, pbTempPtr, dwTrackSize);
+            else nread = fread(pbTempPtr, dwTrackSize, 1, pfileObject);
+            if (!nread) {
+              iRetCode = ERR_DSK_INVALID;
+              goto exit;
+            }
+          } else {
+            memset(&drive->track[track][side], 0, sizeof(t_track)); // track not formatted
+          }
+        }
+      }
+      drive->altered = 0; // disk is as yet unmodified
+    }
+/*    {
+    char *pchTmpBuffer = new char[MAX_LINE_LEN];
+    LoadString(hAppInstance, MSG_DSK_LOAD, chMsgBuffer, sizeof(chMsgBuffer));
+    snprintf(pchTmpBuffer, _MAX_PATH-1, chMsgBuffer, chID, chID == 'A' ? CPC.drvA_file : CPC.drvB_file);
+    add_message(pchTmpBuffer);
+    delete [] pchTmpBuffer;
+  } */
+exit:
+    if (zipfile)
+    {
+      unzCloseCurrentFile(zipfile);
+      unzClose(zipfile);
+    }
+    else fclose(pfileObject);
+  }
+
+  if (iRetCode != 0) { // on error, 'eject' disk from drive
+    dsk_eject(drive);
+  }
+  return iRetCode;
+}
+
+/*
 int dsk_load (char *pchFileName, t_drive *drive, char chID)
 {
    int iRetCode;
@@ -1918,7 +2104,7 @@ int dsk_load (char *pchFileName, t_drive *drive, char chID)
          snprintf(pchTmpBuffer, _MAX_PATH-1, chMsgBuffer, chID, chID == 'A' ? CPC.drvA_file : CPC.drvB_file);
          add_message(pchTmpBuffer);
          delete [] pchTmpBuffer;
-      } */
+      } *
 exit:
       fclose(pfileObject);
    } else {
@@ -1930,7 +2116,8 @@ exit:
    }
    return iRetCode;
 }
-
+*/
+    
 int dsk_save (char *pchFileName, t_drive *drive, char chID)
 {
    t_DSK_header dh;

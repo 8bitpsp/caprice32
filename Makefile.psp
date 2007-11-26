@@ -3,9 +3,10 @@ PSPSDK=$(shell psp-config --pspsdk-path)
 PSPAPP=psp
 PSPLIB=$(PSPAPP)/mypsp
 DATA=$(PSPAPP)/data
+MINIZIP=minizip
 
 PSP_APP_NAME=Caprice32 PSP
-PSP_APP_VER=4.2.0.0
+PSP_APP_VER=4.2.0.1
 
 TARGET=cpc32psp
 EXTRA_TARGETS=EBOOT.PBP
@@ -13,18 +14,19 @@ PSP_EBOOT_TITLE=$(PSP_APP_NAME) $(PSP_APP_VER)
 PSP_EBOOT_ICON=$(DATA)/caprice-icon.png
 
 BUILD_APP=z80.o fdc.o tape.o psg.o 4.1.0/crtc.o
-#crtc.o 
 BUILD_PSPAPP=$(PSPAPP)/main.o $(PSPAPP)/emulate.o $(PSPAPP)/menu.o \
              $(PSPAPP)/cap32_psp.o
+BUILD_MINIZIP=$(MINIZIP)/ioapi.o $(MINIZIP)/unzip.o $(MINIZIP)/zip.o
 
-OBJS=$(BUILD_APP) $(BUILD_PSPAPP)
+OBJS=$(BUILD_APP) $(BUILD_PSPAPP) $(BUILD_MINIZIP)
 
 DEFINES=-DLSB_FIRST -DALIGN_DWORD -DCRTC_4_1_0
 BASE_DEFS=-DPSP -DPSP_APP_VER=\"$(PSP_APP_VER)\" -DPSP_APP_NAME="\"$(PSP_APP_NAME)\""
-CFLAGS=-O2 -G0 -Wall $(BASE_DEFS) $(DEFINES) -funroll-loops -ffast-math -fomit-frame-pointer -fno-strength-reduce -finline-functions -s
+CFLAGS=-O2 -G0 -Wall $(BASE_DEFS) $(DEFINES) -funroll-loops -ffast-math \
+			 -fomit-frame-pointer -fno-strength-reduce -finline-functions -s
 CXXFLAGS=$(CFLAGS) -fno-exceptions -fno-rtti
 ASFLAGS=$(CFLAGS)
-INCDIR=$(PSPLIB) .
+INCDIR=$(PSPLIB) . $(MINIZIP)
 LIBDIR=$(PSPLIB)
 LIBS=-lmypsp -lpng -lm -lstdc++ -lc -lz -lpspgu -lpsppower -lpspaudio -lpsprtc
 
