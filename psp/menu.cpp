@@ -822,7 +822,10 @@ int OnMenuItemChanged(const struct PspUiMenu *uimenu, PspMenuItem* item,
           pspUiAlert(RES_S_RAM_RESIZE_WARNING);
           return 0;
         }
-        emulator_reset(true);
+
+        /* Reconfigure emulator */
+        emulator_shutdown();
+        emulator_init();
       }
       break;
     case SYSTEM_SCREEN:
@@ -848,7 +851,10 @@ int OnMenuItemChanged(const struct PspUiMenu *uimenu, PspMenuItem* item,
           pspUiAlert(RES_S_RAM_RESIZE_WARNING);
           return 0;
         }
-        emulator_reset(true);
+
+        /* Reconfigure emulator */
+        emulator_shutdown();
+        emulator_init();
       }
       break;
     case OPTION_DISPLAY_MODE:
