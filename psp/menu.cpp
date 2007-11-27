@@ -46,6 +46,9 @@
 #define OPTION_ANIMATE      0x28
 #define OPTION_AUTOLOAD     0x29
 
+#define RESOURCE_DISK 1
+#define RESOURCE_TAPE 2
+
 extern struct GameConfig ActiveGameConfig;
 extern PspImage *Screen;
 
@@ -425,6 +428,9 @@ int InitMenu()
   DiskPath = NULL;
   TapePath = NULL;
 
+  CPC.drvA_zip = false;
+  CPC.tape_zip = false;
+  
   LoadOptions();
 
   if (!InitEmulation())
@@ -565,16 +571,20 @@ void DisplayMenu()
       pspMenuSelectOptionByValue(item, (void*)CPC.scr_tube);
       item = pspMenuFindItemById(SystemUiMenu.Menu, SYSTEM_RAM);
       pspMenuSelectOptionByValue(item, (void*)CPC.ram_size);
+      
       item = pspMenuFindItemById(SystemUiMenu.Menu, SYSTEM_DRIVEA);
       pspMenuModifyOption(item->Options, 
         (DiskPath) ? pspFileGetFilename(DiskPath) : RES_S_VACANT, NULL);
       pspMenuSetHelpText(item, (DiskPath) 
-          ? RES_S_STORAGE_TAKEN_HELP : RES_S_STORAGE_VACANT_HELP);
+        ? ((CPC.drvA_zip) ? RES_S_STORAGE_RD_HELP : RES_S_STORAGE_RW_HELP) 
+        : RES_S_STORAGE_VACANT_HELP);
+      
       item = pspMenuFindItemById(SystemUiMenu.Menu, SYSTEM_TAPE);
       pspMenuModifyOption(item->Options, 
         (TapePath) ? pspFileGetFilename(DiskPath) : RES_S_VACANT, NULL);
       pspMenuSetHelpText(item, (TapePath) 
-          ? RES_S_STORAGE_TAKEN_HELP : RES_S_STORAGE_VACANT_HELP);
+        ? RES_S_STORAGE_RD_HELP : RES_S_STORAGE_VACANT_HELP);
+      
       pspUiOpenMenu(&SystemUiMenu, NULL);
       break;
     case TAB_ABOUT:
@@ -724,21 +734,35 @@ int OnFileOk(const void *browser, const void *path)
   pspMenuModifyOption(item->Options, 
     (DiskPath) ? pspFileGetFilename(DiskPath) : RES_S_VACANT, NULL);
   pspMenuSetHelpText(item, (DiskPath) 
-      ? RES_S_STORAGE_TAKEN_HELP : RES_S_STORAGE_VACANT_HELP);
-
+    ? ((CPC.drvA_zip) ? RES_S_STORAGE_RD_HELP : RES_S_STORAGE_RW_HELP) 
+    : RES_S_STORAGE_VACANT_HELP);
+  
   item = pspMenuFindItemById(SystemUiMenu.Menu, SYSTEM_TAPE);
   pspMenuModifyOption(item->Options, 
     (TapePath) ? pspFileGetFilename(DiskPath) : RES_S_VACANT, NULL);
   pspMenuSetHelpText(item, (TapePath) 
-      ? RES_S_STORAGE_TAKEN_HELP : RES_S_STORAGE_VACANT_HELP);
+    ? RES_S_STORAGE_RD_HELP : RES_S_STORAGE_VACANT_HELP);
 
   return 1;
 }
 
 int OnQuickloadOk(const void *browser, const void *path)
 {
-  if (!LoadResource((char*)path))
+  switch(LoadResource((char*)path))
+  {
+  case 0:
     return 0;
+  case RESOURCE_DISK:
+    tape_eject();
+    free(TapePath);
+    TapePath = NULL;
+    break;
+  case RESOURCE_TAPE:
+    dsk_eject(&driveA);
+    free(DiskPath);
+    DiskPath = NULL;
+    break;
+  }
   
   /* Reset loaded game */
   if (LoadedGame) free(LoadedGame);
@@ -944,12 +968,27 @@ int OnMenuButtonPress(const struct PspUiMenu *uimenu, PspMenuItem* sel_item,
   }
   else
   {
-    if (button_mask & PSP_CTRL_TRIANGLE)
+    if (button_mask & PSP_CTRL_SQUARE)
+    {
+      switch(sel_item->ID)
+      {
+      case SYSTEM_DRIVEA:
+        if (!DiskPath || CPC.drvA_zip || !pspUiConfirm("Save changes?")) break;
+        
+        pspUiFlashMessage("Please wait, writing changes to disk image...\n"
+            "Do not turn off or suspend the system");
+        dsk_save(DiskPath, &driveA, 'A');
+        break;
+      }
+    }
+    else if (button_mask & PSP_CTRL_TRIANGLE)
     {
       switch(sel_item->ID)
       {
       case SYSTEM_DRIVEA:
         if (!DiskPath || !pspUiConfirm("Eject disk?")) break;
+        
+        CPC.drvA_zip = false;
         dsk_eject(&driveA);
         DiskPath = NULL;
         
@@ -958,6 +997,8 @@ int OnMenuButtonPress(const struct PspUiMenu *uimenu, PspMenuItem* sel_item,
         break;
       case SYSTEM_TAPE:
         if (!TapePath || !pspUiConfirm("Eject tape?")) break;
+        
+        CPC.tape_zip = false;
         tape_eject();
         TapePath = NULL;
         
@@ -1483,11 +1524,11 @@ int LoadResource(const char *path)
       return 0;
     }
     
-    free(TapePath);
     free(DiskPath);
     DiskPath = strdup(path);
+    CPC.drvA_zip = (*selected_file);
     
-    tape_eject();
+    return RESOURCE_DISK;
   }
   else if (pspFileEndsWith(filename, "CDT"))
   {
@@ -1498,10 +1539,10 @@ int LoadResource(const char *path)
     }
     
     free(TapePath);
-    free(DiskPath);
     TapePath = strdup(path);
+    CPC.tape_zip = (*selected_file);
     
-    dsk_eject(&driveA);
+    return RESOURCE_TAPE;
   }
   else if (pspFileEndsWith(filename, "VOC"))
   {
@@ -1512,13 +1553,13 @@ int LoadResource(const char *path)
     }
     
     free(TapePath);
-    free(DiskPath);
+    CPC.tape_zip = (*selected_file);
     TapePath = strdup(path);
     
-    dsk_eject(&driveA);
+    return RESOURCE_TAPE;
   }
 
-  return 1;
+  return 0;
 }
 
 void TrashMenu()

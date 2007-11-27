@@ -188,8 +188,9 @@ int  printer_start(void);
 void printer_stop(void);
 
 void dsk_eject (t_drive *drive);
-int dsk_load(char *pchFileName, char *archive_filename, 
+int  dsk_load(char *pchFileName, char *archive_filename, 
              t_drive *drive, char chID);
+int  dsk_save (char *pchFileName, t_drive *drive, char chID);
 
 int  tape_insert (char *pchFileName);
 int  tape_insert_voc (char *pchFileName);

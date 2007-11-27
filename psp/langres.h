@@ -162,7 +162,9 @@
 #define RES_S_TAPE    "Tape drive"
 #define RES_S_VACANT  "Vacant"
 
-#define RES_S_STORAGE_TAKEN_HELP \
+#define RES_S_STORAGE_RD_HELP \
+  "\026\001\020 Browse\t\026"PSP_CHAR_TRIANGLE"\020 Eject"
+#define RES_S_STORAGE_RW_HELP \
   "\026"PSP_CHAR_SQUARE"\020 Save\t\026\001\020 Browse\t\026"PSP_CHAR_TRIANGLE"\020 Eject"
 #define RES_S_STORAGE_VACANT_HELP \
   "\026\001\020 Browse"
