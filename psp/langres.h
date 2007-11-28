@@ -168,3 +168,7 @@
   "\026"PSP_CHAR_SQUARE"\020 Save\t\026\001\020 Browse\t\026"PSP_CHAR_TRIANGLE"\020 Eject"
 #define RES_S_STORAGE_VACANT_HELP \
   "\026\001\020 Browse"
+
+#define RES_S_WRITING_CHANGES \
+  "Please wait, writing changes to disk image...\n"\
+  "Do not turn off or suspend the system"

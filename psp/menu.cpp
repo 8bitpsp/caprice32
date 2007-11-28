@@ -981,8 +981,7 @@ int OnMenuButtonPress(const struct PspUiMenu *uimenu, PspMenuItem* sel_item,
       case SYSTEM_DRIVEA:
         if (!DiskPath || CPC.drvA_zip || !pspUiConfirm("Save changes?")) break;
         
-        pspUiFlashMessage("Please wait, writing changes to disk image...\n"
-            "Do not turn off or suspend the system");
+        pspUiFlashMessage(RES_S_WRITING_CHANGES);
         dsk_save(DiskPath, &driveA, 'A');
         break;
       }
@@ -1053,7 +1052,7 @@ int OnSaveStateButtonPress(const PspUiGallery *gallery, PspMenuItem *sel,
   if (button_mask & PSP_CTRL_SQUARE || button_mask & PSP_CTRL_TRIANGLE)
   {
     char *path;
-    char caption[32];
+    char caption[64];
     const char *config_name;
     config_name = (LoadedGame) ? pspFileGetFilename(LoadedGame) : EmptyCartName;
     PspMenuItem *item = pspMenuFindItemById(gallery->Menu, sel->ID);
@@ -1089,12 +1088,13 @@ int OnSaveStateButtonPress(const PspUiGallery *gallery, PspMenuItem *sel,
 
         /* Get file modification time/date */
         if (sceIoGetstat(path, &stat) < 0) sprintf(caption, RES_S_ERROR);
-        else sprintf(caption, "%02i/%02i/%02i %02i:%02i", 
+        else sprintf(caption, "%02i/%02i/%02i %02i:%02i%s", 
                      stat.st_mtime.month,
                      stat.st_mtime.day,
                      stat.st_mtime.year - (stat.st_mtime.year / 100) * 100,
                      stat.st_mtime.hour,
-                     stat.st_mtime.minute);
+                     stat.st_mtime.minute,
+                     ((int)item->ID == Options.AutoloadSlot) ? "*" : "");
 
         pspMenuSetCaption(item, caption);
       }
@@ -1328,12 +1328,13 @@ void ShowStateTab()
     if (pspFileCheckIfExists(path))
     {
       if (sceIoGetstat(path, &stat) < 0) sprintf(caption, RES_S_ERROR);
-      else sprintf(caption, "%02i/%02i/%02i %02i:%02i",
+      else sprintf(caption, "%02i/%02i/%02i %02i:%02i%s",
                    stat.st_mtime.month,
                    stat.st_mtime.day,
                    stat.st_mtime.year - (stat.st_mtime.year / 100) * 100,
                    stat.st_mtime.hour,
-                   stat.st_mtime.minute);
+                   stat.st_mtime.minute,
+                   ((int)item->ID == Options.AutoloadSlot) ? "*" : "");
 
       pspMenuSetCaption(item, caption);
       item->Icon = LoadStateIcon(path);
